@@ -331,6 +331,7 @@ namespace wi::scene
 		material.aniso_anisosin_anisocos_terrainblend = pack_half4(_anisotropy_strength, _anisotropy_rotation_sin, _anisotropy_rotation_cos, _blend_with_terrain_height_rcp);
 		material.shaderType_meshblend = ((uint)shaderType & 0xFFFF) | (XMConvertFloatToHalf(mesh_blend) << 16u);
 		material.userdata = userdata;
+		material.padding.x = bumpMapStrength;
 
 		if (shaderType == SHADERTYPE_INTERIORMAPPING)
 		{

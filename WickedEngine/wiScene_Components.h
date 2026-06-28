@@ -188,6 +188,7 @@ namespace wi::scene
 		float reflectance = 0.02f;
 		float metalness = 0.0f;
 		float normalMapStrength = 1.0f;
+		float bumpMapStrength = 1.0f;
 		float parallaxOcclusionMapping = 0.0f;
 		float displacementMapping = 0.0f;
 		float refraction = 0.0f;
@@ -221,6 +222,7 @@ namespace wi::scene
 		{
 			BASECOLORMAP,
 			NORMALMAP,
+			BUMPMAP,
 			SURFACEMAP,
 			EMISSIVEMAP,
 			DISPLACEMENTMAP,
@@ -319,6 +321,7 @@ namespace wi::scene
 		constexpr void SetChromaticAberrationAmount(float value) { SetDirty(); chromatic_aberration = value; }
 		constexpr void SetRefractionAmount(float value) { SetDirty(); refraction = value; }
 		constexpr void SetNormalMapStrength(float value) { SetDirty(); normalMapStrength = value; }
+		constexpr void SetBumpMapStrength(float value) { SetDirty(); bumpMapStrength = value; }
 		constexpr void SetParallaxOcclusionMapping(float value) { SetDirty(); parallaxOcclusionMapping = value; }
 		constexpr void SetDisplacementMapping(float value) { SetDirty(); displacementMapping = value; }
 		constexpr void SetSubsurfaceScatteringColor(XMFLOAT3 value)

@@ -104,6 +104,7 @@ enum TEXTURESLOT
 {
 	BASECOLORMAP,
 	NORMALMAP,
+	BUMPMAP,
 	SURFACEMAP,
 	EMISSIVEMAP,
 	DISPLACEMENTMAP,
@@ -400,6 +401,7 @@ struct alignas(32) ShaderMaterial
 	ShaderTextureSlot textures[TEXTURESLOT_COUNT];
 
 	float4 padding;
+	float4 padding2;
 
 	inline void init()
 	{
@@ -427,6 +429,7 @@ struct alignas(32) ShaderMaterial
 
 		userdata = uint4(0, 0, 0, 0);
 		padding = float4(0, 0, 0, 0);
+		padding2 = float4(0, 0, 0, 0);
 
 		for (int i = 0; i < TEXTURESLOT_COUNT; ++i)
 		{
@@ -447,6 +450,7 @@ struct alignas(32) ShaderMaterial
 	inline half3 GetEmissive() { return unpack_half4(emissive_cloak).rgb; }
 	inline half GetCloak() { return unpack_half4(emissive_cloak).a; }
 	inline half3 GetSpecular() { return unpack_half3(specular_chromatic); }
+	inline half GetBumpMapStrength() { return (half)padding.x; }
 	inline half GetChromaticAberration() { return unpack_half4(specular_chromatic).w; }
 	inline half3 GetSheenColor() { return unpack_half3(sheenColor_saturation); }
 	inline half GetSaturation() { return unpack_half4(sheenColor_saturation).w; }
@@ -491,7 +495,7 @@ struct alignas(32) ShaderMaterial
 #endif // __cplusplus
 };
 #ifdef __cplusplus
-static_assert(sizeof(ShaderMaterial) == 384);
+static_assert(sizeof(ShaderMaterial) == 416);
 inline static const ShaderMaterial shader_material_null = ShaderMaterial::get_null();
 #endif // __cplusplus
 

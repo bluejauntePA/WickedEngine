@@ -481,6 +481,7 @@ namespace wi::lua::scene
 			Metalness = FloatProperty(&component->metalness);
 			NormalMapStrength = FloatProperty(&component->normalMapStrength);
 			ParallaxOcclusionMapping = FloatProperty(&component->parallaxOcclusionMapping);
+			BumpMapStrength = FloatProperty(&component->bumpMapStrength);
 			DisplacementMapping = FloatProperty(&component->displacementMapping);
 			Refraction = FloatProperty(&component->refraction);
 			Transmission = FloatProperty(&component->transmission);
@@ -519,6 +520,7 @@ namespace wi::lua::scene
 		FloatProperty Metalness;
 		FloatProperty NormalMapStrength;
 		FloatProperty ParallaxOcclusionMapping;
+		FloatProperty BumpMapStrength;
 		FloatProperty DisplacementMapping;
 		FloatProperty Refraction;
 		FloatProperty Transmission;
@@ -547,6 +549,7 @@ namespace wi::lua::scene
 		PropertyFunction(Metalness)
 		PropertyFunction(NormalMapStrength)
 		PropertyFunction(ParallaxOcclusionMapping)
+		PropertyFunction(BumpMapStrength)
 		PropertyFunction(DisplacementMapping)
 		PropertyFunction(Refraction)
 		PropertyFunction(Transmission)

@@ -270,6 +270,12 @@ namespace wi::scene
 			{
 				archive >> mesh_blend;
 			}
+			if (seri.GetVersion() >= 12)
+			{
+				archive >> bumpMapStrength;
+				archive >> textures[BUMPMAP].name;
+				archive >> textures[BUMPMAP].uvset;
+			}
 
 			for (auto& x : textures)
 			{
@@ -448,6 +454,12 @@ namespace wi::scene
 			if (seri.GetVersion() >= 11)
 			{
 				archive << mesh_blend;
+			}
+			if (seri.GetVersion() >= 12)
+			{
+				archive << bumpMapStrength;
+				archive << wi::helper::GetPathRelative(dir, textures[BUMPMAP].name);
+				archive << textures[BUMPMAP].uvset;
 			}
 		}
 	}

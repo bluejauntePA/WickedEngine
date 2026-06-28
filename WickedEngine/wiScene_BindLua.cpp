@@ -4840,6 +4840,7 @@ Luna<MaterialComponent_BindLua>::PropertyType MaterialComponent_BindLua::propert
 	lunaproperty(MaterialComponent_BindLua, Metalness),
 	lunaproperty(MaterialComponent_BindLua, NormalMapStrength),
 	lunaproperty(MaterialComponent_BindLua, ParallaxOcclusionMapping),
+	lunaproperty(MaterialComponent_BindLua, BumpMapStrength),
 	lunaproperty(MaterialComponent_BindLua, DisplacementMapping),
 	lunaproperty(MaterialComponent_BindLua, Refraction),
 	lunaproperty(MaterialComponent_BindLua, Transmission),

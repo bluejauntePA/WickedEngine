@@ -549,6 +549,55 @@ struct Surface
 #endif // WATER
 			}
 
+			// Height-map bump perturbation. This composes with NORMALMAP by adding
+			// the sampled height gradient to the existing tangent-space normal.
+			[branch]
+			if (geometry.vb_tan >= 0 && material.textures[BUMPMAP].IsValid() && material.GetBumpMapStrength() > 0)
+			{
+				uint bump_uvset = material.textures[BUMPMAP].GetUVSet();
+				float2 bump_dim = float2(1, 1);
+				material.textures[BUMPMAP].GetTexture().GetDimensions(bump_dim.x, bump_dim.y);
+				float2 bump_texel = rcp(max(bump_dim, float2(1, 1)));
+
+				float4 uvsets_left = uvsets;
+				float4 uvsets_right = uvsets;
+				float4 uvsets_down = uvsets;
+				float4 uvsets_up = uvsets;
+				if (bump_uvset == 0)
+				{
+					uvsets_left.xy -= float2(bump_texel.x, 0);
+					uvsets_right.xy += float2(bump_texel.x, 0);
+					uvsets_down.xy -= float2(0, bump_texel.y);
+					uvsets_up.xy += float2(0, bump_texel.y);
+				}
+				else
+				{
+					uvsets_left.zw -= float2(bump_texel.x, 0);
+					uvsets_right.zw += float2(bump_texel.x, 0);
+					uvsets_down.zw -= float2(0, bump_texel.y);
+					uvsets_up.zw += float2(0, bump_texel.y);
+				}
+
+#ifdef SURFACE_LOAD_QUAD_DERIVATIVES
+				half height_left = material.textures[BUMPMAP].SampleGrad(sam, uvsets_left, uvsets_dx, uvsets_dy).r;
+				half height_right = material.textures[BUMPMAP].SampleGrad(sam, uvsets_right, uvsets_dx, uvsets_dy).r;
+				half height_down = material.textures[BUMPMAP].SampleGrad(sam, uvsets_down, uvsets_dx, uvsets_dy).r;
+				half height_up = material.textures[BUMPMAP].SampleGrad(sam, uvsets_up, uvsets_dx, uvsets_dy).r;
+#else
+				float lod = 0;
+#ifdef SURFACE_LOAD_MIPCONE
+				lod = compute_texture_lod(material.textures[BUMPMAP].GetTexture(), bump_uvset == 0 ? lod_constant0 : lod_constant1, ray_direction, surf_normal, cone_width);
+#endif // SURFACE_LOAD_MIPCONE
+				half height_left = material.textures[BUMPMAP].SampleLevel(sam, uvsets_left, lod).r;
+				half height_right = material.textures[BUMPMAP].SampleLevel(sam, uvsets_right, lod).r;
+				half height_down = material.textures[BUMPMAP].SampleLevel(sam, uvsets_down, lod).r;
+				half height_up = material.textures[BUMPMAP].SampleLevel(sam, uvsets_up, lod).r;
+#endif // SURFACE_LOAD_QUAD_DERIVATIVES
+
+				bumpColor = any(bumpColor) ? bumpColor : half3(0, 0, 1);
+				bumpColor.rg += half2(height_left - height_right, height_down - height_up) * material.GetBumpMapStrength();
+			}
+
 #ifdef ANISOTROPIC
 			aniso.strength = material.GetAnisotropy();
 			aniso.direction = half2(material.GetAnisotropyCos(), material.GetAnisotropySin());
