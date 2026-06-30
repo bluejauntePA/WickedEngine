@@ -43,11 +43,13 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 	RayDesc ray = CreateCameraRay(pixel, xTracePixelOffset);
 
 	// Depth of field setup:
-	float3 focal_point = ray.Origin + ray.Direction * GetCamera().focal_length;
+	float focus_plane_distance = dot(GetCamera().position + GetCamera().forward * GetCamera().focal_length - ray.Origin, GetCamera().forward);
+	float focus_distance = focus_plane_distance / max(0.001f, abs(dot(ray.Direction, GetCamera().forward)));
+	float3 focal_point = ray.Origin + ray.Direction * focus_distance;
 	float3 coc = float3(hemispherepoint_cos(rng.next_float(), rng.next_float()).xy, 0);
 	coc.xy *= GetCamera().aperture_shape.xy;
 	coc = mul(coc, float3x3(cross(GetCamera().up, GetCamera().forward), GetCamera().up, GetCamera().forward));
-	coc *= GetCamera().focal_length;
+	coc *= focus_distance;
 	coc *= GetCamera().aperture_size;
 	coc *= 0.1f;
 	ray.Origin = ray.Origin + coc;
