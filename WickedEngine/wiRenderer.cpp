@@ -131,6 +131,7 @@ bool occlusionCulling = true;
 bool temporalAA = false;
 bool temporalAADEBUG = false;
 uint32_t raytraceBounceCount = 8;
+float raytraceIndirectBoost = 1;
 bool raytraceDebugVisualizer = false;
 bool raytracedShadows = false;
 bool tessellationEnabled = true;
@@ -11037,6 +11038,7 @@ void RayTraceScene(
 	cb.xTraceUserData.x = raytraceBounceCount;
 	uint8_t instanceInclusionMask = 0xFF;
 	cb.xTraceUserData.y = instanceInclusionMask;
+	cb.xTraceUserData.z = wi::math::asuint(raytraceIndirectBoost);
 	cb.xTraceSampleIndex = (uint32_t)accumulation_sample;
 	device->BindDynamicConstantBuffer(cb, CB_GETBINDSLOT(RaytracingCB), cmd);
 
@@ -19632,6 +19634,14 @@ void SetRaytraceBounceCount(uint32_t bounces)
 uint32_t GetRaytraceBounceCount()
 {
 	return raytraceBounceCount;
+}
+void SetRaytraceIndirectBoost(float value)
+{
+	raytraceIndirectBoost = std::max(0.0f, value);
+}
+float GetRaytraceIndirectBoost()
+{
+	return raytraceIndirectBoost;
 }
 void SetRaytraceDebugBVHVisualizerEnabled(bool value)
 {

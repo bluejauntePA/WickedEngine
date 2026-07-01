@@ -1244,6 +1244,8 @@ namespace wi::renderer
 	bool IsShadowsEnabled();
 	void SetRaytraceBounceCount(uint32_t bounces);
 	uint32_t GetRaytraceBounceCount();
+	void SetRaytraceIndirectBoost(float value);
+	float GetRaytraceIndirectBoost();
 	void SetRaytraceDebugBVHVisualizerEnabled(bool value);
 	bool GetRaytraceDebugBVHVisualizerEnabled();
 	void SetRaytracedShadowsEnabled(bool value);

@@ -67,6 +67,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 	uint stencil = 0;
 
 	const uint bounces = xTraceUserData.x;
+	const float indirect_boost = max(0, asfloat(xTraceUserData.z));
 	for (uint bounce = 0; bounce < bounces; ++bounce)
 	{
 		ray.Direction = normalize(ray.Direction);
@@ -426,7 +427,8 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 					lightColor *= shadow;
 					lighting.direct.diffuse = lightColor * BRDF_GetDiffuse(surface, surfaceToLight);
 					lighting.direct.specular = lightColor * BRDF_GetSpecular(surface, surfaceToLight);
-					result += light_count * mad(surface.albedo / PI * (1 - surface.transmission), lighting.direct.diffuse, lighting.direct.specular) * surface.opacity;
+					const float bounce_boost = bounce > 0 ? indirect_boost : 1;
+					result += bounce_boost * light_count * mad(surface.albedo / PI * (1 - surface.transmission), lighting.direct.diffuse, lighting.direct.specular) * surface.opacity;
 				}
 			}
 		}
