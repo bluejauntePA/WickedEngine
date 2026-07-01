@@ -266,13 +266,17 @@ inline void light_point(in ShaderEntity light, in Surface surface, inout Lightin
 #endif // LIGHTING_SCATTER
 }
 
-inline half attenuation_spotlight(in half dist2, in half range, in half range2, in half spot_factor, in half angle_scale, in half angle_offset)
+inline half attenuation_spotlight(in half dist2, in half range, in half range2, in half spot_factor, in half angle_scale, in half angle_offset, in half angular_falloff_power)
 {
 	half attenuation = attenuation_pointlight(dist2, range, range2);
 	half angularAttenuation = saturate(mad(spot_factor, angle_scale, angle_offset));
-	angularAttenuation *= angularAttenuation;
+	angularAttenuation = pow(angularAttenuation, max((half)0.01, angular_falloff_power));
 	attenuation *= angularAttenuation;
 	return attenuation;
+}
+inline half attenuation_spotlight(in half dist2, in half range, in half range2, in half spot_factor, in half angle_scale, in half angle_offset)
+{
+	return attenuation_spotlight(dist2, range, range2, spot_factor, angle_scale, angle_offset, (half)2.0);
 }
 inline void light_spot(in ShaderEntity light, in Surface surface, inout Lighting lighting, in half shadow_mask = 1)
 {
@@ -339,7 +343,7 @@ inline void light_spot(in ShaderEntity light, in Surface surface, inout Lighting
 		light_color *= mask.rgb * mask.a;
 	}
 	
-	light_color *= attenuation_spotlight(dist2, range, range2, spot_factor, light.GetAngleScale(), light.GetAngleOffset());
+	light_color *= attenuation_spotlight(dist2, range, range2, spot_factor, light.GetAngleScale(), light.GetAngleOffset(), light.GetLength());
 		
 	lighting.direct.diffuse = mad(light_color, BRDF_GetDiffuse(surface, surface_to_light), lighting.direct.diffuse);
 

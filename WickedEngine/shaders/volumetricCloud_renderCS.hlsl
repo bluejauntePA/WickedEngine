@@ -419,7 +419,7 @@ float3 SampleLocalLights(float3 worldPosition)
 							{
 								lightColor = light.GetColor().rgb;
 								lightColor = min(lightColor, HALF_FLT_MAX) * LOCAL_LIGHTS_INTENSITY_MULTIPLIER;
-								lightColor *= attenuation_spotlight(dist2, range, range2, spotFactor, light.GetAngleScale(), light.GetAngleOffset());
+								lightColor *= attenuation_spotlight(dist2, range, range2, spotFactor, light.GetAngleScale(), light.GetAngleOffset(), light.GetLength());
 							}
 						}
 					}
