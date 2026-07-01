@@ -68,6 +68,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 
 	const uint bounces = xTraceUserData.x;
 	const float indirect_boost = max(0, asfloat(xTraceUserData.z));
+	bool transmission_ray = false;
 	for (uint bounce = 0; bounce < bounces; ++bounce)
 	{
 		ray.Direction = normalize(ray.Direction);
@@ -88,7 +89,10 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 
 		uint flags = RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES;
 #ifdef RAY_BACKFACE_CULLING
-		flags |= RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
+		if (!transmission_ray)
+		{
+			flags |= RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
+		}
 #endif // RAY_BACKFACE_CULLING
 		if (bounce > ANYTHIT_CUTOFF_AFTER_BOUNCE_COUNT)
 		{
@@ -454,9 +458,19 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 		if (rng.next_float() < surface.transmission)
 		{
 			// Refraction
-			const float3 R = refract(ray.Direction, surface.N, 1 - lerp(surface.material.GetRefraction(), 0.1, surface.material.GetCloak()));
+			float eta = 1 - lerp(surface.material.GetRefraction(), 0.1, surface.material.GetCloak());
+			if (surface.IsBackface())
+			{
+				eta = rcp(max(0.001, eta));
+			}
+			float3 R = refract(ray.Direction, surface.N, eta);
+			if (!any(R))
+			{
+				R = reflect(ray.Direction, surface.N);
+			}
 			float roughnessBRDF = sqr(clamp(lerp(surface.roughness, 0.1, surface.material.GetCloak()), min_roughness, 1));
 			ray.Direction = lerp(R, sample_hemisphere_cos(R, rng), roughnessBRDF);
+			transmission_ray = true;
 			if (!is_water) // water will have depth based extinction instead of simple tint
 			{
 				energy *= lerp(surface.albedo, 1, surface.material.GetCloak()) / max(0.001, surface.transmission);
@@ -467,6 +481,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 		}
 		else
 		{
+			transmission_ray = false;
 			const float specular_chance = dot(surface.F, 0.333);
 			if (rng.next_float() < specular_chance)
 			{
