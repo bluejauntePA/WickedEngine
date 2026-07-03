@@ -57,7 +57,7 @@ namespace wi
 
 		{
 			TextureDesc desc;
-			desc.format = wi::renderer::format_rendertarget_main;
+			desc.format = Format::R16G16B16A16_FLOAT;
 			desc.bind_flags = BindFlag::RENDER_TARGET | BindFlag::SHADER_RESOURCE | BindFlag::UNORDERED_ACCESS;
 			desc.width = internalResolution.x;
 			desc.height = internalResolution.y;
@@ -110,7 +110,7 @@ namespace wi
 		{
 			TextureDesc desc;
 			desc.bind_flags = BindFlag::SHADER_RESOURCE | BindFlag::UNORDERED_ACCESS;
-			desc.format = Format::R11G11B10_FLOAT;
+			desc.format = Format::R16G16B16A16_FLOAT;
 			desc.width = internalResolution.x;
 			desc.height = internalResolution.y;
 			device->CreateTexture(&desc, nullptr, &rtPostprocess);
@@ -398,7 +398,8 @@ namespace wi
 						&traceDepth,
 						&traceStencil,
 						&depthBuffer_Main,
-						&rtPrimitiveID
+						&rtPrimitiveID,
+						drawEnvironment
 					);
 
 					wi::profiler::EndRange(range); // Traced Scene
@@ -506,7 +507,7 @@ namespace wi
 					wi::image::Params fx;
 					fx.enableFullScreen();
 					fx.blendFlag = wi::enums::BLENDMODE_OPAQUE;
-					if (denoiserResult.IsValid() && !wi::jobsystem::IsBusy(denoiserContext))
+					if (drawEnvironment && denoiserResult.IsValid() && !wi::jobsystem::IsBusy(denoiserContext))
 					{
 						wi::image::Draw(&denoiserResult, fx, cmd);
 					}

@@ -36,6 +36,8 @@ namespace wi
 		int getCurrentSampleCount() const { return sam; }
 		void setTargetSampleCount(int value) { target = value; }
 		float getProgress() const { return (float)sam / (float)target; }
+		void setDrawEnvironment(bool value) { drawEnvironment = value; }
+		bool getDrawEnvironment() const { return drawEnvironment; }
 
 		float denoiserProgress = 0;
 		float getDenoiserProgress() const { return denoiserProgress; }
@@ -48,6 +50,9 @@ namespace wi
 		// This is an identifier of RenderPath subtype that is used for lua binding.
 		static constexpr const auto script_check_identifier = relative_path_storage(__FILE__);
 		const char* GetScriptBindingID() const override { return script_check_identifier.c_str(); }
+
+	private:
+		bool drawEnvironment = true;
 	};
 
 }

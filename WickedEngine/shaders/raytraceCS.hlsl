@@ -33,6 +33,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 	if (pixel.x >= xTraceResolution.x || pixel.y >= xTraceResolution.y)
 		return;
 	float3 result = 0;
+	float result_alpha = 1;
 	float3 energy = 1;
 
 	RNG rng;
@@ -74,6 +75,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 
 	const uint bounces = xTraceUserData.x;
 	const float indirect_boost = max(0, asfloat(xTraceUserData.z));
+	const bool draw_environment = xTraceUserData.w != 0;
 	bool transmission_ray = false;
 	for (uint bounce = 0; bounce < bounces; ++bounce)
 	{
@@ -157,6 +159,11 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 
 		if (exit_sky)
 		{
+			if (bounce == 0 && !draw_environment)
+			{
+				result_alpha = 0;
+			}
+
 			float3 envColor;
 			bool clouds_enabled = bounce > 0;
 			[branch]
@@ -511,7 +518,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 
 	}
 	
-	output[pixel] = lerp(output[pixel], float4(result, 1), xTraceAccumulationFactor);
+	output[pixel] = lerp(output[pixel], float4(result, result_alpha), xTraceAccumulationFactor);
 	output_albedo[pixel] = lerp(output_albedo[pixel], float4(primary_albedo, 1), xTraceAccumulationFactor);
 	output_normal[pixel] = lerp(output_normal[pixel], float4(primary_normal, 1), xTraceAccumulationFactor);
 

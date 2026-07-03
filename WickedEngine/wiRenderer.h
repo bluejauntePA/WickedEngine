@@ -1109,7 +1109,8 @@ namespace wi::renderer
 		const wi::graphics::Texture* output_depth = nullptr,
 		const wi::graphics::Texture* output_stencil = nullptr,
 		const wi::graphics::Texture* output_depth_stencil = nullptr,
-		const wi::graphics::Texture* output_primitiveID = nullptr
+		const wi::graphics::Texture* output_primitiveID = nullptr,
+		bool drawEnvironment = true
 	);
 	// Render the scene BVH with ray tracing to the screen
 	void RayTraceSceneBVH(const wi::scene::Scene& scene, wi::graphics::CommandList cmd);

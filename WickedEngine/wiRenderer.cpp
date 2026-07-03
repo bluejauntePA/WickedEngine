@@ -11011,7 +11011,8 @@ void RayTraceScene(
 	const Texture* output_depth,
 	const Texture* output_stencil,
 	const Texture* output_depth_stencil,
-	const Texture* output_primitiveID
+	const Texture* output_primitiveID,
+	bool drawEnvironment
 )
 {
 	if (!scene.TLAS.IsValid() && !scene.BVH.IsValid())
@@ -11039,6 +11040,7 @@ void RayTraceScene(
 	uint8_t instanceInclusionMask = 0xFF;
 	cb.xTraceUserData.y = instanceInclusionMask;
 	cb.xTraceUserData.z = wi::math::asuint(raytraceIndirectBoost);
+	cb.xTraceUserData.w = drawEnvironment ? 1u : 0u;
 	cb.xTraceSampleIndex = (uint32_t)accumulation_sample;
 	device->BindDynamicConstantBuffer(cb, CB_GETBINDSLOT(RaytracingCB), cmd);
 
