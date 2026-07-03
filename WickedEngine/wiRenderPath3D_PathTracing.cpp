@@ -399,7 +399,8 @@ namespace wi
 						&traceStencil,
 						&depthBuffer_Main,
 						&rtPrimitiveID,
-						drawEnvironment
+						drawEnvironment,
+						visualizeTransparentEnvironment
 					);
 
 					wi::profiler::EndRange(range); // Traced Scene

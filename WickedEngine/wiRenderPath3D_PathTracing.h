@@ -38,6 +38,7 @@ namespace wi
 		float getProgress() const { return (float)sam / (float)target; }
 		void setDrawEnvironment(bool value) { drawEnvironment = value; }
 		bool getDrawEnvironment() const { return drawEnvironment; }
+		void setVisualizeTransparentEnvironment(bool value) { visualizeTransparentEnvironment = value; }
 
 		float denoiserProgress = 0;
 		float getDenoiserProgress() const { return denoiserProgress; }
@@ -53,6 +54,7 @@ namespace wi
 
 	private:
 		bool drawEnvironment = true;
+		bool visualizeTransparentEnvironment = false;
 	};
 
 }

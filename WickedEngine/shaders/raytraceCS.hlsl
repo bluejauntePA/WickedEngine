@@ -75,7 +75,8 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 
 	const uint bounces = xTraceUserData.x;
 	const float indirect_boost = max(0, asfloat(xTraceUserData.z));
-	const bool draw_environment = xTraceUserData.w != 0;
+	const bool draw_environment = (xTraceUserData.w & 1) != 0;
+	const bool visualize_transparent_environment = (xTraceUserData.w & 2) != 0;
 	bool transmission_ray = false;
 	for (uint bounce = 0; bounce < bounces; ++bounce)
 	{
@@ -162,6 +163,13 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 			if (bounce == 0 && !draw_environment)
 			{
 				result_alpha = 0;
+				if (visualize_transparent_environment)
+				{
+					float checker = (((pixel.x / 16u) + (pixel.y / 16u)) & 1u) ? 0.72 : 0.48;
+					result += checker.xxx;
+					result_alpha = 1;
+					break;
+				}
 			}
 
 			float3 envColor;

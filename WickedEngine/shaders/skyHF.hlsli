@@ -186,7 +186,7 @@ float3 GetStaticSkyColor(in float3 V, bool clouds_enabled = true)
 		sky = bindless_cubemaps[descriptor_index(GetScene().globalenvmap)].SampleLevel(sampler_linear_clamp, V, 0).rgb;
 	}
 	
-	sky *= GetWeather().sky_exposure;
+	sky *= GetWeather().sky_exposure * GetAmbientColor();
 
 	if (clouds_enabled && V.y > 0 && GetScene().texture_cloudmap >= 0)
 	{
