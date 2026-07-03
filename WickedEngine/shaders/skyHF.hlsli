@@ -162,6 +162,12 @@ float3 GetDynamicSkyColor(in float3 V, bool sun_enabled = true, bool dark_enable
 
 float3 GetStaticSkyColor(in float3 V, bool clouds_enabled = true)
 {
+	// BJ Wicked exports Daz scene axes into Wicked's Y-up world, but static sky
+	// maps are authored in the Daz-facing environment basis. Pitch the lookup
+	// direction by -90 degrees around X so the HDR horizon lines up with the
+	// Daz scene forward plane instead of showing the lower hemisphere.
+	V = float3(V.x, V.z, -V.y);
+
 	ShaderWeather weather = GetWeather();
 	float2x2 rot = float2x2(
 		weather.sky_rotation_cos, -weather.sky_rotation_sin,
