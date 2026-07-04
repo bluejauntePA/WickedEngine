@@ -705,7 +705,10 @@ namespace wi
 				wi::profiler::EndRange(range);
 			}
 
-			wi::renderer::TextureStreamingReadbackCopy(*scene, cmd);
+			if (readbackEnabled)
+			{
+				wi::renderer::TextureStreamingReadbackCopy(*scene, cmd);
+			}
 		});
 
 		RenderPath2D::Render();

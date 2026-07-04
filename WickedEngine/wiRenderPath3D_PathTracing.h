@@ -8,8 +8,9 @@ namespace wi
 	class RenderPath3D_PathTracing : public RenderPath3D
 	{
 	protected:
-		int sam = -1;
+		mutable int sam = -1;
 		int target = 1024;
+		int sampleBatchSize = 1;
 		wi::graphics::Texture traceResult;
 		wi::graphics::Texture traceDepth;
 		wi::graphics::Texture traceStencil;
@@ -35,10 +36,12 @@ namespace wi
 
 		int getCurrentSampleCount() const { return sam; }
 		void setTargetSampleCount(int value) { target = value; }
+		void setSampleBatchSize(int value) { sampleBatchSize = std::max(1, value); }
 		float getProgress() const { return (float)sam / (float)target; }
 		void setDrawEnvironment(bool value) { drawEnvironment = value; }
 		bool getDrawEnvironment() const { return drawEnvironment; }
 		void setVisualizeTransparentEnvironment(bool value) { visualizeTransparentEnvironment = value; }
+		void setReadbackEnabled(bool value) { readbackEnabled = value; }
 
 		float denoiserProgress = 0;
 		float getDenoiserProgress() const { return denoiserProgress; }
@@ -55,6 +58,7 @@ namespace wi
 	private:
 		bool drawEnvironment = true;
 		bool visualizeTransparentEnvironment = false;
+		bool readbackEnabled = true;
 	};
 
 }
