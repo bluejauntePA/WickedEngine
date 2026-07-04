@@ -509,14 +509,8 @@ struct PrimitiveVisibilityTile
 
 struct VisibilityTile
 {
-	uint64_t execution_mask_or_primitiveID; // divergent tiles: execution mask | uniform tiles: primitiveID
+	uint64_t shaderType_or_primitiveID; // divergent tiles: shaderType | uniform tiles: primitiveID
 	uint visibility_tile_id;
-	uint materialIndex; // only valid for uniform primitiveID path
-
-	inline bool check_thread_valid(uint groupIndex)
-	{
-		return (execution_mask_or_primitiveID & (uint64_t(1) << uint64_t(groupIndex))) != 0;
-	}
 };
 
 enum SHADERMESH_FLAGS
@@ -619,7 +613,7 @@ struct alignas(16) ShaderMeshlet
 	uint instanceIndex;
 	uint geometryIndex;
 	uint primitiveOffset; // either direct triangle offset within index buffer, or masked cluster index for clustered geo
-	uint padding;
+	uint materialIndex_shaderType; // 24bit materialIndex | 8bit shaderType
 };
 
 struct ShaderClusterTriangle
@@ -1333,6 +1327,11 @@ struct alignas(16) ShaderCamera
 	float		z_range;
 	float		z_range_rcp;
 
+	float		far_mul_near_mul_2;
+	float		near_sub_far;
+	float		far_sub_near;
+	float		near_plus_far;
+
 	float4x4	view;
 	float4x4	projection;
 	float4x4	inverse_view;
@@ -1381,8 +1380,8 @@ struct alignas(16) ShaderCamera
 
 	int texture_depth_index;
 	int texture_velocity_index;
-	int texture_normal_index;
-	int texture_roughness_index;
+	int texture_normal_roughness_index;
+	int padding0;
 
 	int texture_reflection_index;
 	int texture_reflection_depth_index;
@@ -1419,6 +1418,10 @@ struct alignas(16) ShaderCamera
 		z_far_rcp = {};
 		z_range = {};
 		z_range_rcp = {};
+		far_mul_near_mul_2 = {};
+		near_sub_far = {};
+		far_sub_near = {};
+		near_plus_far = {};
 		view = {};
 		projection = {};
 		inverse_view = {};
@@ -1454,8 +1457,7 @@ struct alignas(16) ShaderCamera
 		texture_primitiveID_index = -1;
 		texture_depth_index = -1;
 		texture_velocity_index = -1;
-		texture_normal_index = -1;
-		texture_roughness_index = -1;
+		texture_normal_roughness_index = -1;
 		buffer_entitytiles_index = -1;
 		texture_reflection_index = -1;
 		texture_refraction_index = -1;

@@ -671,12 +671,17 @@ struct PrimitiveID
 	uint subsetIndex;
 	bool maybe_clustered;
 
+	uint materialIndex; // only available when unpacking from meshlet data, in this case the PRIMITIVEID_FROM_MESHLET_OPTIMIZED define can be used
+	uint shaderType; // only available when unpacking from meshlet data, in this case the PRIMITIVEID_FROM_MESHLET_OPTIMIZED define can be used
+
 	inline void init()
 	{
 		primitiveIndex = 0;
 		instanceIndex = 0;
 		subsetIndex = 0;
 		maybe_clustered = false;
+		materialIndex = 0;
+		shaderType = 0;
 	}
 
 	// These packing methods require meshlet data, and pack into 32 bits:
@@ -704,26 +709,30 @@ struct PrimitiveID
 		primitiveIndex = meshlet.primitiveOffset + meshletPrimitiveIndex;
 		instanceIndex = meshlet.instanceIndex;
 		subsetIndex = meshlet.geometryIndex - inst.geometryOffset;
+		materialIndex = meshlet.materialIndex_shaderType & 0xFFFFFF;
+		shaderType = meshlet.materialIndex_shaderType >> 24u;
 		maybe_clustered = true;
 	}
 
 	// These packing methods don't need meshlets, but they are packed into 64 bits:
-	uint2 pack2()
+	inline uint2 pack2()
 	{
 		// 32 bit primitiveIndex + 1 valid check
 		// 24 bit instanceIndex
 		// 8  bit subsetIndex
 		return uint2(primitiveIndex + 1, (instanceIndex & 0xFFFFFF) | ((subsetIndex & 0xFF) << 24u));
 	}
-	void unpack2(uint2 value)
+	inline void unpack2(uint2 value)
 	{
 		primitiveIndex = value.x - 1; // remove valid check
 		instanceIndex = value.y & 0xFFFFFF;
 		subsetIndex = (value.y >> 24u) & 0xFF;
+		materialIndex = 0;
+		shaderType = 0;
 		maybe_clustered = false;
 	}
 
-	uint3 tri()
+	inline uint3 tri()
 	{
 		ShaderMeshInstance inst = load_instance(instanceIndex);
 		ShaderGeometry geometry = load_geometry(inst.geometryOffset + subsetIndex);
@@ -733,21 +742,18 @@ struct PrimitiveID
 			const uint clusterID = primitiveIndex >> 7u;
 			const uint triangleID = primitiveIndex & 0x7F;
 			ShaderCluster cluster = bindless_structured_cluster[NonUniformResourceIndex(descriptor_index(geometry.vb_clu))][clusterID];
-			uint i0 = cluster.vertices[cluster.triangles[triangleID].i0()];
-			uint i1 = cluster.vertices[cluster.triangles[triangleID].i1()];
-			uint i2 = cluster.vertices[cluster.triangles[triangleID].i2()];
+			const uint i0 = cluster.vertices[cluster.triangles[triangleID].i0()];
+			const uint i1 = cluster.vertices[cluster.triangles[triangleID].i1()];
+			const uint i2 = cluster.vertices[cluster.triangles[triangleID].i2()];
 			return uint3(i0, i1, i2);
 		}
 		const uint startIndex = primitiveIndex * 3 + geometry.indexOffset;
 		Buffer<uint> indexBuffer = bindless_buffers_uint[NonUniformResourceIndex(descriptor_index(geometry.ib))];
-		uint i0 = indexBuffer[startIndex + 0];
-		uint i1 = indexBuffer[startIndex + 1];
-		uint i2 = indexBuffer[startIndex + 2];
+		const uint i0 = indexBuffer[startIndex + 0];
+		const uint i1 = indexBuffer[startIndex + 1];
+		const uint i2 = indexBuffer[startIndex + 2];
 		return uint3(i0, i1, i2);
 	}
-	uint i0() { return tri().x; }
-	uint i1() { return tri().y; }
-	uint i2() { return tri().z; }
 };
 
 #define texture_random64x64 bindless_textures[descriptor_index(GetFrame().texture_random64x64_index)]
@@ -766,8 +772,7 @@ struct PrimitiveID
 #define texture_depth_history bindless_textures_float[descriptor_index(GetCamera().texture_depth_index_prev)]
 #define texture_primitiveID bindless_textures_uint[descriptor_index(GetCamera().texture_primitiveID_index)]
 #define texture_velocity bindless_textures_float2[descriptor_index(GetCamera().texture_velocity_index)]
-#define texture_normal bindless_textures_float2[descriptor_index(GetCamera().texture_normal_index)]
-#define texture_roughness bindless_textures_float[descriptor_index(GetCamera().texture_roughness_index)]
+#define texture_normal_roughness bindless_textures_half4[descriptor_index(GetCamera().texture_normal_roughness_index)]
 
 // Note: defines can be better for choosing between half/float by compiler than "static const float"
 #define PI 3.14159265358979323846
@@ -1378,6 +1383,7 @@ inline float3x3 compute_tangent_frame(float3 N, float3 P, float2 UV)
 }
 
 // Computes linear depth from post-projection depth
+//	This version can be used without camera struct with raw values
 template<typename T>
 inline T compute_lineardepth(in T z, in float near, in float far, in bool ortho = false)
 {
@@ -1385,19 +1391,42 @@ inline T compute_lineardepth(in T z, in float near, in float far, in bool ortho 
 		return near + (1 - z) * (far - near); // ortho
 
 	// Perspective:
-	T z_n = 2 * z - 1;
-	T lin = 2 * far * near / (near + far - z_n * (near - far));
-	return lin;
+	return 2 * far * near / (near + far - (z * 2 - 1) * (near - far));
+}
+// Computes linear depth from post-projection depth
+//	This version uses camera constant buffer with some precomputed values for optimization:
+template<typename T>
+inline T compute_lineardepth(in T z, in ShaderCamera camera)
+{
+	if (camera.IsOrtho())
+		return camera.z_near + (1 - z) * camera.far_sub_near; // ortho
+
+	// Perspective:
+	return camera.far_mul_near_mul_2 / (camera.near_plus_far - (z * 2 - 1) * camera.near_sub_far);
 }
 template<typename T>
 inline T compute_lineardepth(in T z)
 {
-	return compute_lineardepth(z, GetCamera().z_near, GetCamera().z_far, GetCamera().IsOrtho());
+	return compute_lineardepth(z, GetCamera());
 }
 template<typename T>
 inline T compute_lineardepth_normalized(in T z)
 {
 	return compute_lineardepth(z) * GetCamera().z_far_rcp;
+}
+
+// Computes post-projection depth from linear depth
+inline float compute_inverse_lineardepth(in float lin, in float near, in float far, in bool ortho = false)
+{
+	if (ortho)
+		return 1 - (lin - near) / (far - near);
+
+	// Perspective:
+	return (((lin - 2 * far) * near + far * lin) / (lin * near - far * lin) + 1) * 0.5;
+}
+inline float compute_inverse_lineardepth(in float lin)
+{
+	return compute_inverse_lineardepth(lin, GetCamera().z_near, GetCamera().z_far, GetCamera().IsOrtho());
 }
 
 // This is a helper to allow using texture_lineardepth as if there was an existing texture with normalized lineardepth information in [0,1] range
@@ -1412,22 +1441,6 @@ struct LinearDepthTextureEmulator
 	void GetDimensions(out uint x, out uint y) { return texture_depth.GetDimensions(x, y); }
 };
 static const LinearDepthTextureEmulator texture_lineardepth;
-
-// Computes post-projection depth from linear depth
-inline float compute_inverse_lineardepth(in float lin, in float near, in float far, in bool ortho = false)
-{
-	if (ortho)
-		return 1 - (lin - near) / (far - near);
-
-	// Perspective:
-	float z_n = ((lin - 2 * far) * near + far * lin) / (lin * near - far * lin);
-	float z = (z_n + 1) / 2;
-	return z;
-}
-inline float compute_inverse_lineardepth(in float lin)
-{
-	return compute_inverse_lineardepth(lin, GetCamera().z_near, GetCamera().z_far, GetCamera().IsOrtho());
-}
 
 inline float3x3 get_tangentspace(in float3 normal)
 {
@@ -1734,6 +1747,19 @@ half3 decode_oct(half2 e)
 	return normalize(v);
 }
 
+half2 encode_normal(in half3 v)
+{
+	return encode_oct(v) * 0.5 + 0.5;
+}
+half3 decode_normal(in half2 e)
+{
+	return decode_oct(e * 2 - 1);
+}
+half3 decode_normal(in half4 e)
+{
+	return decode_oct(e.xy * 2 - 1);
+}
+
 // Assume normalized input on +Z hemisphere.
 // Output is on [-1, 1].
 half2 encode_hemioct(in half3 v)
@@ -1769,6 +1795,21 @@ uint2 remap_lane_8x8(uint lane) {
 	return uint2(bitfield_insert(bitfield_extract(lane, 2u, 3u), lane, 1u)
 		, bitfield_insert(bitfield_extract(lane, 3u, 3u)
 			, bitfield_extract(lane, 1u, 2u), 2u));
+}
+
+// Similar to remap_lane_8x8 which remaps SV_GroupIndex to a 2D grid for QuadRead access, but this works with larger block sizes but it's laid out differently
+uint2 remap_lane_quads(uint groupIndex)
+{
+	uint idx = groupIndex | (groupIndex << 15);  // Pack for parallel x/y extraction
+	uint2 coord;
+	coord.x  = idx & 0x10001;
+	coord.x |= (idx >> 1) & 0x20002;
+	coord.x |= (idx >> 2) & 0x40004;
+	coord.x |= (idx >> 3) & 0x80008;   // extra bits for 32x32 support
+	coord.x |= (idx >> 4) & 0x100010;  // extra for larger groups
+	coord.y = coord.x >> 16;
+	coord.x &= 0x1F;  // Mask to 5 bits (covers up to 32)
+	return coord;
 }
 
 
