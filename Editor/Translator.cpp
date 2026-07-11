@@ -1283,6 +1283,14 @@ XMMATRIX Translator::GetMirrorMatrix(TRANSLATOR_STATE state, const CameraCompone
 	if (isRotator || isLocalSpace)
 		return mirror;
 
+	mirror *= XMMatrixScaling(
+		tool_world_axis_sign.x,
+		tool_world_axis_sign.y,
+		tool_world_axis_sign.z);
+
+	if (!tool_mirror_axes_to_camera)
+		return mirror;
+
 	switch (state)
 	{
 	case Translator::TRANSLATOR_X:
@@ -1341,6 +1349,24 @@ XMMATRIX Translator::GetMirrorMatrix(TRANSLATOR_STATE state, const CameraCompone
 }
 void Translator::WriteAxisText(TRANSLATOR_STATE axis, const wi::scene::CameraComponent& camera, char* text) const
 {
+	if (!tool_mirror_axes_to_camera)
+	{
+		switch (axis)
+		{
+		case Translator::TRANSLATOR_X:
+			std::memcpy(text, "X", 1);
+			break;
+		case Translator::TRANSLATOR_Y:
+			std::memcpy(text, "Y", 1);
+			break;
+		case Translator::TRANSLATOR_Z:
+			std::memcpy(text, "Z", 1);
+			break;
+		default:
+			break;
+		}
+		return;
+	}
 	switch (axis)
 	{
 	case Translator::TRANSLATOR_X:

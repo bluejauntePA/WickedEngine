@@ -37,6 +37,8 @@ public:
 	float tool_darken_negative_axes = 1;
 	float tool_scale = 1.0f;
 	float tool_thickness = 1.0f;
+	bool tool_mirror_axes_to_camera = true;
+	XMFLOAT3 tool_world_axis_sign = XMFLOAT3(1, 1, 1);
 
 	enum TRANSLATOR_STATE
 	{
