@@ -39,6 +39,9 @@ public:
 	float tool_thickness = 1.0f;
 	bool tool_mirror_axes_to_camera = true;
 	XMFLOAT3 tool_world_axis_sign = XMFLOAT3(1, 1, 1);
+	bool tool_axis_x_enabled = true;
+	bool tool_axis_y_enabled = true;
+	bool tool_axis_z_enabled = true;
 
 	enum TRANSLATOR_STATE
 	{
