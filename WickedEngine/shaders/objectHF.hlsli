@@ -1106,6 +1106,24 @@ float4 main(PixelInput input, in bool is_frontface : SV_IsFrontFace APPEND_COVER
 
 	color = saturateMediump(color);
 
+#ifndef PREPASS
+	// Optional screen-space dot mask for application overlays. This is driven
+	// through material userdata so regular Wicked materials are unaffected.
+	// userdata: x = "RPDT", y = spacing in pixels, z = radius * 100.
+	if (material.userdata.x == 0x52504454u)
+	{
+		const float spacing = max(2.0, float(material.userdata.y));
+		const float radius = min(spacing * 0.48, float(material.userdata.z) * 0.01);
+		const float2 cell = (frac(input.pos.xy / spacing) - 0.5) * spacing;
+		const float distanceFromCenter = length(cell);
+		const float antialiasWidth = max(fwidth(distanceFromCenter), 0.75);
+		const float dotCoverage = 1.0 - smoothstep(
+			radius - antialiasWidth, radius + antialiasWidth, distanceFromCenter);
+		color.a *= dotCoverage;
+		clip(dotCoverage - 0.001);
+	}
+#endif // PREPASS
+
 	half alphatest = material.GetAlphaTest() + meshinstance.GetAlphaTest();
 
 	half dithering = 0;
