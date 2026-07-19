@@ -62,7 +62,20 @@ float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_TARGET
 	sy += g22 * K22;
 	float dist = sqrt(sx*sx + sy*sy);
 
-	float edge = dist > outlineThreshold ? 1 : 0;
+	float edge;
+	if (postprocess.params0.z > 0.5f)
+	{
+		// Outside-only coverage avoids doubling the apparent width across the
+		// silhouette. Keeping the Sobel response continuous also allows widths
+		// below one pixel to be represented through antialiasing instead of being
+		// rounded up to a fully opaque multi-pixel edge.
+		edge = saturate((dist - outlineThreshold) * 0.25f)
+			* saturate(1.0f - middle);
+	}
+	else
+	{
+		edge = dist > outlineThreshold ? 1 : 0;
+	}
 
 	return float4(outlineColor.rgb, outlineColor.a * edge);
 }

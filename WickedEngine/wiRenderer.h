@@ -793,7 +793,8 @@ namespace wi::renderer
 		wi::graphics::CommandList cmd,
 		float threshold = 0.1f,
 		float thickness = 1.0f,
-		const XMFLOAT4& color = XMFLOAT4(0, 0, 0, 1)
+		const XMFLOAT4& color = XMFLOAT4(0, 0, 0, 1),
+		bool fractional_width = false
 	);
 	struct MotionBlurResources
 	{

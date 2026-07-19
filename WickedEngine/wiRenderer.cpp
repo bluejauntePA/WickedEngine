@@ -16517,7 +16517,8 @@ void Postprocess_Outline(
 	CommandList cmd,
 	float threshold,
 	float thickness,
-	const XMFLOAT4& color
+	const XMFLOAT4& color,
+	bool fractional_width
 )
 {
 	device->EventBegin("Postprocess_Outline", cmd);
@@ -16534,6 +16535,7 @@ void Postprocess_Outline(
 	postprocess.resolution_rcp.y = 1.0f / postprocess.resolution.y;
 	postprocess.params0.x = threshold;
 	postprocess.params0.y = thickness;
+	postprocess.params0.z = fractional_width ? 1.0f : 0.0f;
 	postprocess.params1.x = color.x;
 	postprocess.params1.y = color.y;
 	postprocess.params1.z = color.z;
