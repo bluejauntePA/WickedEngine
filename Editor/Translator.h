@@ -38,6 +38,7 @@ public:
 	float tool_scale = 1.0f;
 	float tool_thickness = 1.0f;
 	bool tool_mirror_axes_to_camera = true;
+	bool tool_axis_text_in_local_space = false;
 	XMFLOAT3 tool_world_axis_sign = XMFLOAT3(1, 1, 1);
 	bool tool_axis_x_enabled = true;
 	bool tool_axis_y_enabled = true;

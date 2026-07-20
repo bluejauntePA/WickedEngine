@@ -159,7 +159,12 @@ void Translator::Update(const CameraComponent& camera, const XMFLOAT4& currentMo
 			// Decide which state to enter for dragging:
 			XMFLOAT3 p = transform.GetPosition();
 
-			dist = is2D ? (camera.ortho_vertical_size * 0.025f) : std::max(wi::math::Distance(p, camera.Eye) * 0.05f, 0.0001f) * tool_scale;
+			// Size from the camera projection, not from the manipulator interaction
+			// mode. A perspective viewport can use the 2D screen-space rotation ring,
+			// and it still needs distance scaling to remain constant on screen.
+			dist = camera.IsOrtho()
+				? camera.ortho_vertical_size * 0.025f * tool_scale
+				: std::max(wi::math::Distance(p, camera.Eye) * 0.05f, 0.0001f) * tool_scale;
 
 			if (isRotator)
 			{
@@ -985,10 +990,11 @@ void Translator::Draw(const CameraComponent& camera, const XMFLOAT4& currentMous
 
 
 	// Axis texts:
-	if(!isRotator && !isLocalSpace)
+	if (!isRotator && (!isLocalSpace || tool_axis_text_in_local_space))
 	{
 		char TEXT[3];
 		XMMATRIX R = XMLoadFloat3x3(&camera.rotationMatrix);
+		const XMMATRIX axisRotation = GetLocalRotation();
 
 		wi::font::Params params;
 		params.v_align = wi::font::WIFALIGN_CENTER;
@@ -1005,7 +1011,9 @@ void Translator::Draw(const CameraComponent& camera, const XMFLOAT4& currentMous
 		{
 			darken = camera.Eye.x < transform.translation_local.x ? tool_darken_negative_axes : 1;
 			params.color = wi::Color::fromFloat4(XMFLOAT4(darken, channel_min * darken, channel_min * darken, tool_opacity));
-			XMStoreFloat3(&params.position, pos + XMVector3Transform(XMVectorSet(axis_length + 0.5f, 0, 0, 0) * dist, GetMirrorMatrix(TRANSLATOR_X, camera)));
+			XMStoreFloat3(&params.position, pos + XMVector3Transform(
+				XMVectorSet(axis_length + 0.5f, 0, 0, 0) * dist,
+				GetMirrorMatrix(TRANSLATOR_X, camera) * axisRotation));
 			std::memset(TEXT, 0, sizeof(TEXT));
 			WriteAxisText(TRANSLATOR_X, camera, TEXT);
 			wi::font::Draw(TEXT, strlen(TEXT), params, cmd);
@@ -1015,7 +1023,9 @@ void Translator::Draw(const CameraComponent& camera, const XMFLOAT4& currentMous
 		{
 			darken = camera.Eye.y < transform.translation_local.y ? tool_darken_negative_axes : 1;
 			params.color = wi::Color::fromFloat4(XMFLOAT4(channel_min * darken, darken, channel_min * darken, tool_opacity));
-			XMStoreFloat3(&params.position, pos + XMVector3Transform(XMVectorSet(0, axis_length + 0.5f, 0, 0) * dist, GetMirrorMatrix(TRANSLATOR_Y, camera)));
+			XMStoreFloat3(&params.position, pos + XMVector3Transform(
+				XMVectorSet(0, axis_length + 0.5f, 0, 0) * dist,
+				GetMirrorMatrix(TRANSLATOR_Y, camera) * axisRotation));
 			std::memset(TEXT, 0, sizeof(TEXT));
 			WriteAxisText(TRANSLATOR_Y, camera, TEXT);
 			wi::font::Draw(TEXT, strlen(TEXT), params, cmd);
@@ -1025,7 +1035,9 @@ void Translator::Draw(const CameraComponent& camera, const XMFLOAT4& currentMous
 		{
 			darken = camera.Eye.z < transform.translation_local.z ? tool_darken_negative_axes : 1;
 			params.color = wi::Color::fromFloat4(XMFLOAT4(channel_min * darken, channel_min * darken, darken, tool_opacity));
-			XMStoreFloat3(&params.position, pos + XMVector3Transform(XMVectorSet(0, 0, axis_length + 0.5f, 0) * dist, GetMirrorMatrix(TRANSLATOR_Z, camera)));
+			XMStoreFloat3(&params.position, pos + XMVector3Transform(
+				XMVectorSet(0, 0, axis_length + 0.5f, 0) * dist,
+				GetMirrorMatrix(TRANSLATOR_Z, camera) * axisRotation));
 			std::memset(TEXT, 0, sizeof(TEXT));
 			WriteAxisText(TRANSLATOR_Z, camera, TEXT);
 			wi::font::Draw(TEXT, strlen(TEXT), params, cmd);
