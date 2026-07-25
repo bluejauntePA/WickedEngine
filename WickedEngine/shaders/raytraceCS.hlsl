@@ -1,9 +1,4 @@
-// BJ Wicked: Daz scenes commonly use zero-thickness planes for floors and walls.
-// Backface culling lets dome-light bounce rays see the environment through the
-// underside of those planes, producing bright contact leaks under objects. Treat
-// static path-traced scene geometry as two-sided for ray hits so thin occluders
-// block environment light from either side.
-// #define RAY_BACKFACE_CULLING
+#define RAY_BACKFACE_CULLING
 #define RAYTRACE_STACK_SHARED
 #define SURFACE_LOAD_MIPCONE
 #define SVT_FEEDBACK
@@ -17,7 +12,6 @@
 
 // This value specifies after which bounce the anyhit will be disabled:
 static const uint ANYTHIT_CUTOFF_AFTER_BOUNCE_COUNT = 1;
-static const float BJ_WICKED_PATH_TRACE_EPSILON = 0.000001;
 
 RWTexture2D<float4> output : register(u0);
 RWTexture2D<float4> output_albedo : register(u1);
@@ -33,7 +27,6 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 	if (pixel.x >= xTraceResolution.x || pixel.y >= xTraceResolution.y)
 		return;
 	float3 result = 0;
-	float result_alpha = 1;
 	float3 energy = 1;
 
 	RNG rng;
@@ -50,13 +43,11 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 	RayDesc ray = CreateCameraRay(pixel, xTracePixelOffset);
 
 	// Depth of field setup:
-	float focus_plane_distance = dot(GetCamera().position + GetCamera().forward * GetCamera().focal_length - ray.Origin, GetCamera().forward);
-	float focus_distance = focus_plane_distance / max(0.001f, abs(dot(ray.Direction, GetCamera().forward)));
-	float3 focal_point = ray.Origin + ray.Direction * focus_distance;
+	float3 focal_point = ray.Origin + ray.Direction * GetCamera().focal_length;
 	float3 coc = float3(hemispherepoint_cos(rng.next_float(), rng.next_float()).xy, 0);
 	coc.xy *= GetCamera().aperture_shape.xy;
 	coc = mul(coc, float3x3(cross(GetCamera().up, GetCamera().forward), GetCamera().up, GetCamera().forward));
-	coc *= focus_distance;
+	coc *= GetCamera().focal_length;
 	coc *= GetCamera().aperture_size;
 	coc *= 0.1f;
 	ray.Origin = ray.Origin + coc;
@@ -74,17 +65,9 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 	uint stencil = 0;
 
 	const uint bounces = xTraceUserData.x;
-	const float indirect_boost = max(0, asfloat(xTraceUserData.z));
-	const bool draw_environment = (xTraceUserData.w & 1) != 0;
-	const bool visualize_transparent_environment = (xTraceUserData.w & 2) != 0;
-	bool transmission_ray = false;
 	for (uint bounce = 0; bounce < bounces; ++bounce)
 	{
 		ray.Direction = normalize(ray.Direction);
-		if (bounce > 0)
-		{
-			ray.TMin = BJ_WICKED_PATH_TRACE_EPSILON;
-		}
 
 		float4 additive_dist = float4(0, 0, 0, FLT_MAX);
 		
@@ -102,10 +85,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 
 		uint flags = RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES;
 #ifdef RAY_BACKFACE_CULLING
-		if (!transmission_ray)
-		{
-			flags |= RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
-		}
+		flags |= RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
 #endif // RAY_BACKFACE_CULLING
 		if (bounce > ANYTHIT_CUTOFF_AFTER_BOUNCE_COUNT)
 		{
@@ -160,18 +140,6 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 
 		if (exit_sky)
 		{
-			if (bounce == 0 && !draw_environment)
-			{
-				result_alpha = 0;
-				if (visualize_transparent_environment)
-				{
-					float checker = (((pixel.x / 16u) + (pixel.y / 16u)) & 1u) ? 0.72 : 0.48;
-					result += checker.xxx;
-					result_alpha = 1;
-					break;
-				}
-			}
-
 			float3 envColor;
 			bool clouds_enabled = bounce > 0;
 			[branch]
@@ -325,7 +293,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 					if (any(surfaceToLight.NdotL_sss))
 					{
 						lightColor = light.GetColor().rgb;
-						lightColor *= attenuation_pointlight(dist2, range, range2);
+						lightColor *= attenuation_pointlight(dist2, range, light.GetRange2Rcp());
 					}
 				}
 			}
@@ -357,7 +325,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 					if (any(surfaceToLight.NdotL_sss))
 					{
 						lightColor = light.GetColor().rgb;
-						lightColor *= attenuation_pointlight(dist2, range, range2);
+						lightColor *= attenuation_pointlight(dist2, range, light.GetRange2Rcp());
 					}
 				}
 			}
@@ -389,7 +357,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 						if (spot_factor > spot_cutoff)
 						{
 							lightColor = light.GetColor().rgb;
-							lightColor *= attenuation_spotlight(dist2, range, range2, spot_factor, light.GetAngleScale(), light.GetAngleOffset(), light.GetLength());
+							lightColor *= attenuation_spotlight(dist2, range, light.GetRange2Rcp(), spot_factor, light.GetAngleScale(), light.GetAngleOffset(), light.GetLength());
 						}
 					}
 				}
@@ -404,8 +372,8 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 				if(light.IsCastingShadow() && surface.IsReceiveShadow())
 				{
 					RayDesc newRay;
-					newRay.Origin = surface.P + surface.facenormal * BJ_WICKED_PATH_TRACE_EPSILON;
-					newRay.TMin = BJ_WICKED_PATH_TRACE_EPSILON;
+					newRay.Origin = surface.P + surface.facenormal * 0.001; // NOTE: TMin was not enough on AMD to avoid self intersection!!!
+					newRay.TMin = 0.001;
 					newRay.TMax = dist;
 					newRay.Direction = normalize(L + max3(surface.sss));
 
@@ -456,8 +424,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 					lightColor *= shadow;
 					lighting.direct.diffuse = lightColor * BRDF_GetDiffuse(surface, surfaceToLight);
 					lighting.direct.specular = lightColor * BRDF_GetSpecular(surface, surfaceToLight);
-					const float bounce_boost = bounce > 0 ? indirect_boost : 1;
-					result += bounce_boost * light_count * mad(surface.albedo / PI * (1 - surface.transmission), lighting.direct.diffuse, lighting.direct.specular) * surface.opacity;
+					result += light_count * mad(surface.albedo / PI * (1 - surface.transmission), lighting.direct.diffuse, lighting.direct.specular) * surface.opacity;
 				}
 			}
 		}
@@ -483,19 +450,9 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 		if (rng.next_float() < surface.transmission)
 		{
 			// Refraction
-			float eta = 1 - lerp(surface.material.GetRefraction(), 0.1, surface.material.GetCloak());
-			if (surface.IsBackface())
-			{
-				eta = rcp(max(0.001, eta));
-			}
-			float3 R = refract(ray.Direction, surface.N, eta);
-			if (!any(R))
-			{
-				R = reflect(ray.Direction, surface.N);
-			}
+			const float3 R = refract(ray.Direction, surface.N, 1 - lerp(surface.material.GetRefraction(), 0.1, surface.material.GetCloak()));
 			float roughnessBRDF = sqr(clamp(lerp(surface.roughness, 0.1, surface.material.GetCloak()), min_roughness, 1));
 			ray.Direction = lerp(R, sample_hemisphere_cos(R, rng), roughnessBRDF);
-			transmission_ray = true;
 			if (!is_water) // water will have depth based extinction instead of simple tint
 			{
 				energy *= lerp(surface.albedo, 1, surface.material.GetCloak()) / max(0.001, surface.transmission);
@@ -506,7 +463,6 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 		}
 		else
 		{
-			transmission_ray = false;
 			const float specular_chance = dot(surface.F, 0.333);
 			if (rng.next_float() < specular_chance)
 			{
@@ -521,12 +477,12 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 				energy *= surface.albedo * (1 - surface.F) / max(0.001, 1 - specular_chance) / max(0.001, 1 - surface.transmission);
 			}
 
-			ray.Origin += surface.facenormal * BJ_WICKED_PATH_TRACE_EPSILON;
+			ray.Origin += surface.facenormal * 0.001; // NOTE: TMin was not enough on AMD to avoid self intersection!!!
 		}
 
 	}
 	
-	output[pixel] = lerp(output[pixel], float4(result, result_alpha), xTraceAccumulationFactor);
+	output[pixel] = lerp(output[pixel], float4(result, 1), xTraceAccumulationFactor);
 	output_albedo[pixel] = lerp(output_albedo[pixel], float4(primary_albedo, 1), xTraceAccumulationFactor);
 	output_normal[pixel] = lerp(output_normal[pixel], float4(primary_normal, 1), xTraceAccumulationFactor);
 
