@@ -1580,7 +1580,8 @@ namespace wi::gui
 		{
 			if (scrollbar.IsScrollbarRequired())
 			{
-				font.params.h_wrap = scale.x - scrollbar_width;
+				font.params.h_wrap =
+					scale.x - margin_left - margin_right - scrollbar_width;
 			}
 			font.params.posY += scrollbar.GetOffset();
 		}
@@ -4790,8 +4791,13 @@ namespace wi::gui
 		messageLabel.SetText(message);
 		messageLabel.SetShadowRadius(0);
 		messageLabel.SetColor(wi::Color(31, 31, 35, 255));
+		messageLabel.margin_left = 20.0f;
+		messageLabel.margin_right = 20.0f;
+		messageLabel.margin_top = 14.0f;
+		messageLabel.margin_bottom = 14.0f;
 		messageLabel.font.params.h_align = wi::font::WIFALIGN_CENTER;
 		messageLabel.font.params.v_align = wi::font::WIFALIGN_CENTER;
+		messageLabel.scrollbar.SetEnabled(false);
 		for (int i = 0; i < arraysize(messageLabel.sprites); ++i)
 		{
 			messageLabel.sprites[i].params.disableBackground();
@@ -4894,7 +4900,36 @@ namespace wi::gui
 	}
 	void ModalDialog::Update(const wi::Canvas& canvas, float dt)
 	{
-		const XMFLOAT2 size = GetSize();
+		XMFLOAT2 size = GetSize();
+		constexpr float minimum_height = 196.0f;
+		constexpr float screen_margin = 24.0f;
+		constexpr float frame_inset = 8.0f;
+		constexpr float minimum_message_height = 110.0f;
+		constexpr float fixed_content_height = 62.0f;
+		messageLabel.font.params.h_wrap = std::max(
+			1.0f,
+			size.x - frame_inset * 2.0f
+				- messageLabel.margin_left - messageLabel.margin_right);
+		const float text_height = messageLabel.font.TextHeight();
+		const float desired_height =
+			GetControlSize() + fixed_content_height
+				+ std::max(
+					minimum_message_height,
+					text_height + messageLabel.margin_top + messageLabel.margin_bottom);
+		const float maximum_height = std::max(
+			120.0f, canvas.GetLogicalHeight() - screen_margin * 2.0f);
+		const float fitted_height = std::min(
+			std::max(minimum_height, desired_height), maximum_height);
+		const bool scroll_message = desired_height > maximum_height;
+		messageLabel.scrollbar.SetEnabled(scroll_message);
+		messageLabel.font.params.v_align = scroll_message
+			? wi::font::WIFALIGN_TOP
+			: wi::font::WIFALIGN_CENTER;
+		if (std::abs(size.y - fitted_height) > 0.5f)
+		{
+			size.y = fitted_height;
+			SetSize(size);
+		}
 		SetPos(XMFLOAT2(
 			std::max(0.0f, (canvas.GetLogicalWidth() - size.x) * 0.5f),
 			std::max(0.0f, (canvas.GetLogicalHeight() - size.y) * 0.5f)));
