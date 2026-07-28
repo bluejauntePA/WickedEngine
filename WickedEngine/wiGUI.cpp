@@ -75,12 +75,18 @@ namespace wi::gui
 
 		uint32_t priority = 0;
 
-		focus = false;
+		Widget* active_modal =
+			modal_widget != nullptr && modal_widget->IsVisible()
+				? modal_widget
+				: nullptr;
+		focus = active_modal != nullptr;
 		bool force_disable = false;
 		for (size_t i = 0; i < widgets.size(); ++i)
 		{
 			Widget* widget = widgets[i]; // re index in loop, because widgets can be realloced while updating!
-			widget->force_disable = force_disable;
+			widget->force_disable = active_modal != nullptr
+				? widget != active_modal
+				: force_disable;
 			widget->Update(canvas, dt);
 			widget->force_disable = false;
 
@@ -168,6 +174,10 @@ namespace wi::gui
 	}
 	void GUI::RemoveWidget(Widget* widget)
 	{
+		if (modal_widget == widget)
+		{
+			modal_widget = nullptr;
+		}
 		for (auto& x : widgets)
 		{
 			if (x == widget)
@@ -188,6 +198,28 @@ namespace wi::gui
 			}
 		}
 		return nullptr;
+	}
+	void GUI::SetModal(Widget* widget)
+	{
+		if (widget == nullptr)
+		{
+			modal_widget = nullptr;
+			return;
+		}
+		assert(std::find(widgets.begin(), widgets.end(), widget) != widgets.end());
+		modal_widget = widget;
+		widget->Activate();
+	}
+	void GUI::ClearModal(Widget* widget)
+	{
+		if (widget == nullptr || modal_widget == widget)
+		{
+			modal_widget = nullptr;
+		}
+	}
+	Widget* GUI::GetModal() const
+	{
+		return modal_widget;
 	}
 	bool GUI::HasFocus() const
 	{
@@ -4737,6 +4769,182 @@ namespace wi::gui
 		}
 		label.SetText(GetText());
 		moveDragger.SetText(GetText());
+	}
+
+	void ModalDialog::Create(
+		const std::string& title,
+		const std::string& message,
+		const std::string& action)
+	{
+		Window::Create(title, WindowControls::NONE);
+		SetControlSize(24);
+		SetSize(XMFLOAT2(520, 196));
+		font.params.v_align = wi::font::WIFALIGN_CENTER;
+		label.margin_left = 8.0f;
+		Window::RemoveWidget(&scrollbar_horizontal);
+		Window::RemoveWidget(&scrollbar_vertical);
+		scrollbar_horizontal.Detach();
+		scrollbar_vertical.Detach();
+
+		messageLabel.Create(message);
+		messageLabel.SetText(message);
+		messageLabel.SetShadowRadius(0);
+		messageLabel.SetColor(wi::Color(31, 31, 35, 255));
+		messageLabel.font.params.h_align = wi::font::WIFALIGN_CENTER;
+		messageLabel.font.params.v_align = wi::font::WIFALIGN_CENTER;
+		for (int i = 0; i < arraysize(messageLabel.sprites); ++i)
+		{
+			messageLabel.sprites[i].params.disableBackground();
+		}
+		AddWidget(&messageLabel);
+
+		for (size_t i = 0; i < MAX_ACTIONS; ++i)
+		{
+			actionButtons[i].Create("ModalDialogAction" + std::to_string(i));
+			actionButtons[i].SetShadowRadius(1);
+			actionButtons[i].SetColor(
+				wi::Color(64, 64, 69, 255), WIDGET_ID_IDLE);
+			actionButtons[i].SetColor(
+				wi::Color(80, 80, 86, 255), WIDGET_ID_FOCUS);
+			actionButtons[i].SetColor(
+				wi::Color(86, 103, 91, 255), WIDGET_ID_ACTIVE);
+			actionButtons[i].SetColor(
+				wi::Color(72, 72, 77, 255), WIDGET_ID_DEACTIVATING);
+			actionButtons[i].SetVisible(false);
+			actionButtons[i].OnClick([this, i](const EventArgs& args) {
+				if (onAction)
+				{
+					onAction(i, args);
+				}
+			});
+			AddWidget(&actionButtons[i]);
+		}
+		SetActions({ action });
+
+		SetVisible(false);
+	}
+	void ModalDialog::Show(GUI& gui)
+	{
+		owner_gui = &gui;
+		SetVisible(true);
+		for (size_t i = 0; i < MAX_ACTIONS; ++i)
+		{
+			actionButtons[i].SetVisible(i < action_count);
+		}
+		gui.SetModal(this);
+	}
+	void ModalDialog::Dismiss()
+	{
+		if (owner_gui != nullptr)
+		{
+			owner_gui->ClearModal(this);
+			owner_gui = nullptr;
+		}
+		SetVisible(false);
+	}
+	void ModalDialog::SetTitle(const std::string& title)
+	{
+		SetText(title);
+		label.SetText(title);
+	}
+	void ModalDialog::SetMessage(const std::string& message)
+	{
+		messageLabel.SetText(message);
+	}
+	void ModalDialog::SetActions(const wi::vector<std::string>& actions)
+	{
+		action_count = std::clamp<size_t>(actions.empty() ? 1 : actions.size(), 1, MAX_ACTIONS);
+		for (size_t i = 0; i < MAX_ACTIONS; ++i)
+		{
+			actionButtons[i].SetVisible(i < action_count);
+			if (i < action_count)
+			{
+				actionButtons[i].SetText(actions.empty() ? "OK" : actions[i]);
+				actionButtons[i].SetEnabled(true);
+			}
+		}
+	}
+	void ModalDialog::SetActionText(const std::string& action)
+	{
+		actionButtons[0].SetText(action);
+	}
+	void ModalDialog::SetActionEnabled(bool enabled, size_t index)
+	{
+		assert(index < action_count);
+		actionButtons[index].SetEnabled(enabled);
+	}
+	Button& ModalDialog::GetActionButton(size_t index)
+	{
+		assert(index < action_count);
+		return actionButtons[index];
+	}
+	const Button& ModalDialog::GetActionButton(size_t index) const
+	{
+		assert(index < action_count);
+		return actionButtons[index];
+	}
+	size_t ModalDialog::GetActionCount() const
+	{
+		return action_count;
+	}
+	void ModalDialog::OnAction(
+		std::function<void(size_t index, const EventArgs& args)> func)
+	{
+		onAction = std::move(func);
+	}
+	void ModalDialog::Update(const wi::Canvas& canvas, float dt)
+	{
+		const XMFLOAT2 size = GetSize();
+		SetPos(XMFLOAT2(
+			std::max(0.0f, (canvas.GetLogicalWidth() - size.x) * 0.5f),
+			std::max(0.0f, (canvas.GetLogicalHeight() - size.y) * 0.5f)));
+		Window::Update(canvas, dt);
+		if (IsVisible())
+		{
+			// Optical centering for the title font's visible glyph bounds:
+			label.font.params.posY += 1.0f;
+		}
+	}
+	void ModalDialog::ResizeLayout()
+	{
+		Window::ResizeLayout();
+		const XMFLOAT2 area = GetWidgetAreaSize();
+		const float content_height = std::max(1.0f, area.y - GetControlSize());
+		const float frame_inset = 8.0f;
+		const float action_gap = 8.0f;
+		const float available_width = std::max(
+			1.0f, area.x - frame_inset * 2.0f - action_gap * float(action_count - 1));
+		const float action_width = std::min(
+			action_count == 1 ? 210.0f : 160.0f,
+			available_width / float(action_count));
+		const float action_height = 34.0f;
+		const float action_y =
+			std::max(frame_inset, content_height - action_height - 12.0f);
+		messageLabel.SetPos(XMFLOAT2(frame_inset, 8.0f));
+		messageLabel.SetSize(XMFLOAT2(
+			std::max(1.0f, area.x - frame_inset * 2.0f),
+			std::max(1.0f, action_y - 16.0f)));
+		const float actions_width =
+			action_width * float(action_count) + action_gap * float(action_count - 1);
+		const float action_left = (area.x - actions_width) * 0.5f;
+		for (size_t i = 0; i < action_count; ++i)
+		{
+			actionButtons[i].SetPos(XMFLOAT2(
+				action_left + float(i) * (action_width + action_gap),
+				action_y));
+			actionButtons[i].SetSize(XMFLOAT2(action_width, action_height));
+		}
+	}
+	void ModalDialog::SetColor(wi::Color color, int id)
+	{
+		if (id == WIDGET_ID_WINDOW_BASE)
+		{
+			Widget::SetColor(color);
+			label.SetColor(color);
+			return;
+		}
+		Widget::SetColor(color, id);
+		label.SetColor(color, id);
 	}
 
 

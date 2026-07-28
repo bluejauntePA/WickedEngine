@@ -233,6 +233,7 @@ namespace wi::gui
 	{
 	private:
 		wi::vector<Widget*> widgets;
+		Widget* modal_widget = nullptr;
 		bool focus = false;
 		bool visible = true;
 	public:
@@ -243,6 +244,12 @@ namespace wi::gui
 		void AddWidget(Widget* widget);
 		void RemoveWidget(Widget* widget);
 		Widget* GetWidget(const std::string& name);
+
+		// A modal widget remains interactive and topmost while every other
+		// top-level widget is disabled. It must already belong to this GUI.
+		void SetModal(Widget* widget);
+		void ClearModal(Widget* widget = nullptr);
+		Widget* GetModal() const;
 
 		// returns true if any gui element has the focus
 		bool HasFocus() const;
@@ -983,6 +990,41 @@ namespace wi::gui
 		void ImportLocalization(const wi::Localization& localization) override;
 
 		wi::graphics::Texture background_overlay;
+	};
+
+	// Centered, fixed in-engine dialog with up to three actions. GUI owns its
+	// modal input and z-order; the caller still owns this object's lifetime.
+	class ModalDialog : public Window
+	{
+	public:
+		Label messageLabel;
+		static constexpr size_t MAX_ACTIONS = 3;
+		Button actionButtons[MAX_ACTIONS];
+
+		void Create(
+			const std::string& title,
+			const std::string& message = {},
+			const std::string& action = "OK");
+		void Show(GUI& gui);
+		void Dismiss();
+		void SetTitle(const std::string& title);
+		void SetMessage(const std::string& message);
+		void SetActions(const wi::vector<std::string>& actions);
+		void SetActionText(const std::string& action);
+		void SetActionEnabled(bool enabled, size_t index = 0);
+		Button& GetActionButton(size_t index);
+		const Button& GetActionButton(size_t index) const;
+		size_t GetActionCount() const;
+		void OnAction(std::function<void(size_t index, const EventArgs& args)> func);
+		void Update(const wi::Canvas& canvas, float dt) override;
+		void ResizeLayout() override;
+		void SetColor(wi::Color color, int id = -1) override;
+		const char* GetWidgetTypeName() const override { return "ModalDialog"; }
+
+	private:
+		GUI* owner_gui = nullptr;
+		size_t action_count = 1;
+		std::function<void(size_t index, const EventArgs& args)> onAction;
 	};
 
 	// HSV-Color Picker
