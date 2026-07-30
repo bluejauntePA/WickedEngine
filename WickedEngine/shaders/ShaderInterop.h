@@ -5,7 +5,11 @@
 
 // Determine shader source path:
 #include "../wiHelper.h"
-static const std::string SHADER_INTEROP_PATH = wi::helper::GetCurrentPath() + "/" + wi::helper::GetDirectoryFromPath(wi::helper::GetPathRelative(wi::helper::GetCurrentPath(), std::string(__FILE__)));
+inline std::string GetShaderInteropPath()
+{
+	return wi::helper::GetCurrentPath() + "/" + wi::helper::GetDirectoryFromPath(
+		wi::helper::GetPathRelative(wi::helper::GetCurrentPath(), std::string(__FILE__)));
+}
 
 // Application-side types:
 #include "../wiMath.h"

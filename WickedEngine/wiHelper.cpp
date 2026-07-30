@@ -1244,8 +1244,9 @@ namespace wi::helper
 		if (filepath.is_absolute())
 		{
 			std::filesystem::path rootpath = ToNativeString(rootdir);
-			std::filesystem::path relative = std::filesystem::relative(filepath, rootpath);
-			if (!relative.empty())
+			std::error_code error;
+			std::filesystem::path relative = std::filesystem::relative(filepath, rootpath, error);
+			if (!error && !relative.empty())
 			{
 				StringConvert(relative.generic_wstring(), path);
 			}
