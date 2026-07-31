@@ -1,4 +1,9 @@
-#define RAY_BACKFACE_CULLING
+// BJ Wicked: Daz scenes commonly use zero-thickness planes for floors and walls.
+// Backface culling lets dome-light bounce rays see the environment through the
+// underside of those planes, producing bright contact leaks under objects. Treat
+// static path-traced scene geometry as two-sided for ray hits so thin occluders
+// block environment light from either side.
+// #define RAY_BACKFACE_CULLING
 #define RAYTRACE_STACK_SHARED
 #define SURFACE_LOAD_MIPCONE
 #define SVT_FEEDBACK
@@ -12,6 +17,7 @@
 
 // This value specifies after which bounce the anyhit will be disabled:
 static const uint ANYTHIT_CUTOFF_AFTER_BOUNCE_COUNT = 1;
+static const float BJ_WICKED_PATH_TRACE_EPSILON = 0.000001;
 
 RWTexture2D<float4> output : register(u0);
 RWTexture2D<float4> output_albedo : register(u1);
@@ -68,6 +74,10 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 	for (uint bounce = 0; bounce < bounces; ++bounce)
 	{
 		ray.Direction = normalize(ray.Direction);
+		if (bounce > 0)
+		{
+			ray.TMin = BJ_WICKED_PATH_TRACE_EPSILON;
+		}
 
 		float4 additive_dist = float4(0, 0, 0, FLT_MAX);
 		
@@ -372,8 +382,8 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 				if(light.IsCastingShadow() && surface.IsReceiveShadow())
 				{
 					RayDesc newRay;
-					newRay.Origin = surface.P + surface.facenormal * 0.001; // NOTE: TMin was not enough on AMD to avoid self intersection!!!
-					newRay.TMin = 0.001;
+					newRay.Origin = surface.P + surface.facenormal * BJ_WICKED_PATH_TRACE_EPSILON;
+					newRay.TMin = BJ_WICKED_PATH_TRACE_EPSILON;
 					newRay.TMax = dist;
 					newRay.Direction = normalize(L + max3(surface.sss));
 
@@ -477,7 +487,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 				energy *= surface.albedo * (1 - surface.F) / max(0.001, 1 - specular_chance) / max(0.001, 1 - surface.transmission);
 			}
 
-			ray.Origin += surface.facenormal * 0.001; // NOTE: TMin was not enough on AMD to avoid self intersection!!!
+			ray.Origin += surface.facenormal * BJ_WICKED_PATH_TRACE_EPSILON;
 		}
 
 	}
