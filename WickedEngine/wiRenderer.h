@@ -90,6 +90,39 @@ namespace wi::renderer
 	// Initializes the renderer
 	void Initialize();
 
+	// Optional pre-initialization object pipeline configuration. By default, Wicked
+	// retains its full background compilation behavior. Applications with a small,
+	// known material set can instead request only their exact startup variants.
+	struct ObjectPipelineVariant
+	{
+		wi::enums::RENDERPASS render_pass = wi::enums::RENDERPASS_MAIN;
+		wi::scene::MaterialComponent::SHADERTYPE shader_type = wi::scene::MaterialComponent::SHADERTYPE_PBR;
+		wi::enums::BLENDMODE blend_mode = wi::enums::BLENDMODE_OPAQUE;
+		wi::graphics::CullMode cull_mode = wi::graphics::CullMode::BACK;
+		uint32_t sample_count = 1;
+		bool tessellation = false;
+		bool alpha_test = false;
+		bool mesh_shader = false;
+		// Non-zero groups are published atomically at a thread-safe point. Group zero
+		// is published independently as soon as its pipeline has been created.
+		uint32_t publication_group = 0;
+	};
+	struct ObjectPipelineCompilationConfig
+	{
+		// When false, variants is ignored and Wicked retains its default behavior.
+		// When true, only variants are compiled after StartRequested... is called.
+		// Requested-only variants currently support MAIN and the two PREPASS modes.
+		bool requested_only = false;
+		wi::vector<ObjectPipelineVariant> variants;
+	};
+	// Must be called before Initialize(). Returns false for a late or invalid request.
+	bool SetObjectPipelineCompilationConfig(const ObjectPipelineCompilationConfig& config);
+	// Starts a requested-only compilation after application-critical startup work.
+	// It is idempotent and returns false until the requested jobs are prepared.
+	bool StartRequestedObjectPipelineCompilation();
+	// True after every requested pipeline has been published for rendering.
+	bool IsRequestedObjectPipelineCompilationComplete();
+
 	// Clears the scene and the associated renderer resources
 	void ClearWorld(wi::scene::Scene& scene);
 

@@ -372,6 +372,242 @@ inline PipelineState* GetObjectPSO(ObjectRenderingVariant variant)
 }
 wi::jobsystem::context mesh_shader_ctx;
 wi::jobsystem::context object_pso_job_ctx;
+static ObjectPipelineCompilationConfig object_pipeline_compilation_config;
+static std::mutex requested_object_pipeline_mutex;
+struct RequestedObjectPipelineJob
+{
+	size_t order = 0;
+	wi::jobsystem::job_function_type function;
+};
+struct RequestedObjectPipelineGroup
+{
+	size_t expected = 0;
+	wi::vector<std::pair<ObjectRenderingVariant, PipelineState>> pending;
+};
+static wi::vector<RequestedObjectPipelineJob> requested_object_pipeline_jobs;
+static wi::unordered_map<uint32_t, RequestedObjectPipelineGroup> requested_object_pipeline_groups;
+static std::atomic<size_t> requested_object_pipeline_published{ 0 };
+static std::atomic_bool requested_object_pipeline_complete{ false };
+static bool requested_object_pipeline_started = false;
+
+static void PrepareRequestedObjectPipelinePublication()
+{
+	std::scoped_lock lock(requested_object_pipeline_mutex);
+	requested_object_pipeline_jobs.clear();
+	requested_object_pipeline_groups.clear();
+	for (const ObjectPipelineVariant& variant : object_pipeline_compilation_config.variants)
+	{
+		if (variant.publication_group != 0)
+		{
+			requested_object_pipeline_groups[variant.publication_group].expected++;
+		}
+	}
+	requested_object_pipeline_published.store(0);
+	requested_object_pipeline_complete.store(false);
+	requested_object_pipeline_started = false;
+}
+static bool IsRequestedVariant(const ObjectPipelineVariant& requested, ObjectRenderingVariant variant)
+{
+	return
+		(uint32_t)requested.render_pass == variant.bits.renderpass &&
+		(uint32_t)requested.shader_type == variant.bits.shadertype &&
+		(uint32_t)requested.blend_mode == variant.bits.blendmode &&
+		(uint32_t)requested.cull_mode == variant.bits.cullmode &&
+		(uint32_t)requested.tessellation == variant.bits.tessellation &&
+		(uint32_t)requested.alpha_test == variant.bits.alphatest &&
+		requested.sample_count == variant.bits.sample_count &&
+		(uint32_t)requested.mesh_shader == variant.bits.mesh_shader;
+}
+static uint32_t GetRequestedObjectPipelinePublicationGroup(ObjectRenderingVariant variant)
+{
+	for (const ObjectPipelineVariant& requested : object_pipeline_compilation_config.variants)
+	{
+		if (IsRequestedVariant(requested, variant))
+			return requested.publication_group;
+	}
+	return 0;
+}
+static void PublishRequestedObjectPipelines(wi::vector<std::pair<ObjectRenderingVariant, PipelineState>> ready)
+{
+	wi::eventhandler::Subscribe_Once(wi::eventhandler::EVENT_THREAD_SAFE_POINT, [ready = std::move(ready)](uint64_t userdata) {
+		for (const auto& item : ready)
+		{
+			*GetObjectPSO(item.first) = item.second;
+		}
+		const size_t published = requested_object_pipeline_published.fetch_add(ready.size()) + ready.size();
+		if (published == object_pipeline_compilation_config.variants.size())
+		{
+			requested_object_pipeline_complete.store(true);
+		}
+	});
+}
+static void PublishObjectPipeline(ObjectRenderingVariant variant, const PipelineState& pso)
+{
+	if (!object_pipeline_compilation_config.requested_only)
+	{
+		wi::eventhandler::Subscribe_Once(wi::eventhandler::EVENT_THREAD_SAFE_POINT, [=](uint64_t userdata) {
+			*GetObjectPSO(variant) = pso;
+		});
+		return;
+	}
+
+	const uint32_t publication_group = GetRequestedObjectPipelinePublicationGroup(variant);
+	if (publication_group == 0)
+	{
+		PublishRequestedObjectPipelines({ { variant, pso } });
+		return;
+	}
+
+	wi::vector<std::pair<ObjectRenderingVariant, PipelineState>> ready;
+	{
+		std::scoped_lock lock(requested_object_pipeline_mutex);
+		RequestedObjectPipelineGroup& group = requested_object_pipeline_groups[publication_group];
+		group.pending.emplace_back(variant, pso);
+		if (group.pending.size() != group.expected)
+			return;
+		ready = std::move(group.pending);
+	}
+	PublishRequestedObjectPipelines(std::move(ready));
+}
+bool StartRequestedObjectPipelineCompilation()
+{
+	wi::vector<RequestedObjectPipelineJob> jobs;
+	{
+		std::scoped_lock lock(requested_object_pipeline_mutex);
+		if (!object_pipeline_compilation_config.requested_only)
+			return false;
+		if (requested_object_pipeline_started)
+			return true;
+		if (requested_object_pipeline_jobs.empty())
+			return false;
+		requested_object_pipeline_started = true;
+		jobs.swap(requested_object_pipeline_jobs);
+	}
+	std::sort(jobs.begin(), jobs.end(), [](const RequestedObjectPipelineJob& a, const RequestedObjectPipelineJob& b) {
+		return a.order < b.order;
+	});
+	wi::jobsystem::Execute(object_pso_job_ctx, [jobs = std::move(jobs)](wi::jobsystem::JobArgs args) {
+		for (const RequestedObjectPipelineJob& job : jobs)
+		{
+			job.function(args);
+		}
+	});
+	return true;
+}
+bool IsRequestedObjectPipelineCompilationComplete()
+{
+	return object_pipeline_compilation_config.requested_only && requested_object_pipeline_complete.load();
+}
+bool SetObjectPipelineCompilationConfig(const ObjectPipelineCompilationConfig& config)
+{
+	if (initialized.load())
+		return false;
+	if (config.requested_only && config.variants.empty())
+		return false;
+	if (!config.requested_only)
+	{
+		object_pipeline_compilation_config = config;
+		return true;
+	}
+
+	for (size_t i = 0; i < config.variants.size(); ++i)
+	{
+		const ObjectPipelineVariant& variant = config.variants[i];
+		if (
+			(variant.render_pass != RENDERPASS_MAIN && variant.render_pass != RENDERPASS_PREPASS && variant.render_pass != RENDERPASS_PREPASS_DEPTHONLY) ||
+			variant.shader_type >= MaterialComponent::SHADERTYPE_COUNT ||
+			variant.blend_mode >= BLENDMODE_COUNT ||
+			(uint32_t)variant.cull_mode > (uint32_t)CullMode::BACK ||
+			(variant.sample_count != 1 && variant.sample_count != 2 && variant.sample_count != 4 && variant.sample_count != 8) ||
+			(variant.render_pass != RENDERPASS_MAIN && (variant.shader_type != MaterialComponent::SHADERTYPE_PBR || variant.blend_mode != BLENDMODE_OPAQUE)) ||
+			(variant.mesh_shader && variant.tessellation)
+		)
+		{
+			return false;
+		}
+		for (size_t j = 0; j < i; ++j)
+		{
+			const ObjectPipelineVariant& previous = config.variants[j];
+			if (
+				variant.render_pass == previous.render_pass &&
+				variant.shader_type == previous.shader_type &&
+				variant.blend_mode == previous.blend_mode &&
+				variant.cull_mode == previous.cull_mode &&
+				variant.sample_count == previous.sample_count &&
+				variant.tessellation == previous.tessellation &&
+				variant.alpha_test == previous.alpha_test &&
+				variant.mesh_shader == previous.mesh_shader
+			)
+			{
+				return false;
+			}
+		}
+	}
+
+	object_pipeline_compilation_config = config;
+	return true;
+}
+static bool ShouldCompileObjectMeshShaders()
+{
+	if (!device->CheckCapability(GraphicsDeviceCapability::MESH_SHADER))
+		return false;
+	if (!object_pipeline_compilation_config.requested_only)
+		return true;
+	for (const ObjectPipelineVariant& variant : object_pipeline_compilation_config.variants)
+	{
+		if (variant.mesh_shader)
+			return true;
+	}
+	return false;
+}
+static size_t GetRequestedObjectPipelineOrder(uint32_t renderPass, uint32_t shaderType, uint32_t mesh_shader)
+{
+	for (size_t i = 0; i < object_pipeline_compilation_config.variants.size(); ++i)
+	{
+		const ObjectPipelineVariant& variant = object_pipeline_compilation_config.variants[i];
+		if (
+			(uint32_t)variant.render_pass == renderPass &&
+			(uint32_t)variant.shader_type == shaderType &&
+			(uint32_t)variant.mesh_shader == mesh_shader
+		)
+		{
+			return i;
+		}
+	}
+	return object_pipeline_compilation_config.variants.size();
+}
+static bool IsObjectPipelineRequested(
+	uint32_t renderPass,
+	uint32_t shaderType,
+	uint32_t mesh_shader,
+	uint32_t blendMode = ~0u,
+	uint32_t cullMode = ~0u,
+	uint32_t tessellation = ~0u,
+	uint32_t alphatest = ~0u,
+	uint32_t sample_count = 0
+)
+{
+	if (!object_pipeline_compilation_config.requested_only)
+		return true;
+
+	for (const ObjectPipelineVariant& requested : object_pipeline_compilation_config.variants)
+	{
+		if (
+			(uint32_t)requested.render_pass == renderPass &&
+			(uint32_t)requested.shader_type == shaderType &&
+			(uint32_t)requested.mesh_shader == mesh_shader &&
+			(blendMode == ~0u || (uint32_t)requested.blend_mode == blendMode) &&
+			(cullMode == ~0u || (uint32_t)requested.cull_mode == cullMode) &&
+			(tessellation == ~0u || (uint32_t)requested.tessellation == tessellation) &&
+			(alphatest == ~0u || (uint32_t)requested.alpha_test == alphatest) &&
+			(sample_count == 0 || requested.sample_count == sample_count)
+		)
+		{
+			return true;
+		}
+	}
+	return false;
+}
 PipelineState PSO_object_wire;
 PipelineState PSO_object_wire_tessellation;
 PipelineState PSO_object_wire_mesh_shader;
@@ -1187,35 +1423,85 @@ void LoadShaders()
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::DS, shaders[DSTYPE_OBJECT_PREPASS], "objectDS_prepass.cso"); });
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::DS, shaders[DSTYPE_OBJECT_SIMPLE], "objectDS_simple.cso"); });
 
-	wi::jobsystem::Dispatch(objectps_ctx, MaterialComponent::SHADERTYPE_COUNT, 1, [](wi::jobsystem::JobArgs args) {
+	if (object_pipeline_compilation_config.requested_only)
+	{
+		bool opaque[MaterialComponent::SHADERTYPE_COUNT] = {};
+		bool transparent[MaterialComponent::SHADERTYPE_COUNT] = {};
+		for (const ObjectPipelineVariant& variant : object_pipeline_compilation_config.variants)
+		{
+			if (variant.render_pass != RENDERPASS_MAIN)
+				continue;
+			if (variant.blend_mode == BLENDMODE_OPAQUE)
+			{
+				opaque[variant.shader_type] = true;
+			}
+			else
+			{
+				transparent[variant.shader_type] = true;
+			}
+		}
+		for (uint32_t shaderType = 0; shaderType < MaterialComponent::SHADERTYPE_COUNT; ++shaderType)
+		{
+			if (opaque[shaderType])
+			{
+				wi::jobsystem::Execute(objectps_ctx, [shaderType](wi::jobsystem::JobArgs args) {
+					LoadShader(
+						ShaderStage::PS,
+						shaders[PSTYPE_OBJECT_PERMUTATION_BEGIN + shaderType],
+						"objectPS.cso",
+						ShaderModel::SM_6_0,
+						MaterialComponent::shaderTypeDefines[shaderType]
+					);
+				});
+			}
+			if (transparent[shaderType])
+			{
+				wi::jobsystem::Execute(objectps_ctx, [shaderType](wi::jobsystem::JobArgs args) {
+					auto defines = MaterialComponent::shaderTypeDefines[shaderType];
+					defines.push_back("TRANSPARENT");
+					LoadShader(
+						ShaderStage::PS,
+						shaders[PSTYPE_OBJECT_TRANSPARENT_PERMUTATION_BEGIN + shaderType],
+						"objectPS.cso",
+						ShaderModel::SM_6_0,
+						defines
+					);
+				});
+			}
+		}
+	}
+	else
+	{
+		wi::jobsystem::Dispatch(objectps_ctx, MaterialComponent::SHADERTYPE_COUNT, 1, [](wi::jobsystem::JobArgs args) {
 
-		LoadShader(
-			ShaderStage::PS,
-			shaders[PSTYPE_OBJECT_PERMUTATION_BEGIN + args.jobIndex],
-			"objectPS.cso",
-			ShaderModel::SM_6_0,
-			MaterialComponent::shaderTypeDefines[args.jobIndex] // permutation defines
-		);
+			LoadShader(
+				ShaderStage::PS,
+				shaders[PSTYPE_OBJECT_PERMUTATION_BEGIN + args.jobIndex],
+				"objectPS.cso",
+				ShaderModel::SM_6_0,
+				MaterialComponent::shaderTypeDefines[args.jobIndex] // permutation defines
+			);
 
-	});
+		});
 
-	wi::jobsystem::Dispatch(objectps_ctx, MaterialComponent::SHADERTYPE_COUNT, 1, [](wi::jobsystem::JobArgs args) {
+		wi::jobsystem::Dispatch(objectps_ctx, MaterialComponent::SHADERTYPE_COUNT, 1, [](wi::jobsystem::JobArgs args) {
 
-		auto defines = MaterialComponent::shaderTypeDefines[args.jobIndex];
-		defines.push_back("TRANSPARENT");
-		LoadShader(
-			ShaderStage::PS,
-			shaders[PSTYPE_OBJECT_TRANSPARENT_PERMUTATION_BEGIN + args.jobIndex],
-			"objectPS.cso",
-			ShaderModel::SM_6_0,
-			defines // permutation defines
-		);
+			auto defines = MaterialComponent::shaderTypeDefines[args.jobIndex];
+			defines.push_back("TRANSPARENT");
+			LoadShader(
+				ShaderStage::PS,
+				shaders[PSTYPE_OBJECT_TRANSPARENT_PERMUTATION_BEGIN + args.jobIndex],
+				"objectPS.cso",
+				ShaderModel::SM_6_0,
+				defines // permutation defines
+			);
 
-	});
+		});
+	}
 
 	wi::jobsystem::Wait(ctx);
 
-	if (device->CheckCapability(GraphicsDeviceCapability::MESH_SHADER))
+	if (ShouldCompileObjectMeshShaders())
 	{
 		// Note: Mesh shader loading is very slow in Vulkan, so all mesh shader loading will be executed on a separate context
 		//	and only waited by mesh shader PSO jobs, not holding back the rest of initialization
@@ -1893,14 +2179,20 @@ void LoadShaders()
 	//	The RenderMeshes that uses these pipeline states will be checking the PipelineState.IsValid() and skip draws if the pipeline is not yet valid
 	wi::jobsystem::Wait(object_pso_job_ctx);
 	object_pso_job_ctx.priority = wi::jobsystem::Priority::Low;
+	if (object_pipeline_compilation_config.requested_only)
+	{
+		PrepareRequestedObjectPipelinePublication();
+	}
 	for (uint32_t renderPass = 0; renderPass < RENDERPASS_COUNT; ++renderPass)
 	{
 		const uint32_t materialtype_differentiation = renderPass == RENDERPASS_MAIN ? MaterialComponent::SHADERTYPE_COUNT : 1; // only RENDERPASS_MAIN needs to handle different material shader types
 		for (uint32_t shaderType = 0; shaderType < materialtype_differentiation; ++shaderType)
 		{
-			for (uint32_t mesh_shader = 0; mesh_shader <= (device->CheckCapability(GraphicsDeviceCapability::MESH_SHADER) ? 1u : 0u); ++mesh_shader)
+			for (uint32_t mesh_shader = 0; mesh_shader <= (ShouldCompileObjectMeshShaders() ? 1u : 0u); ++mesh_shader)
 			{
-				wi::jobsystem::Execute(object_pso_job_ctx, [=](wi::jobsystem::JobArgs args) {
+				if (!IsObjectPipelineRequested(renderPass, shaderType, mesh_shader))
+					continue;
+				auto compileObjectPipelines = [=](wi::jobsystem::JobArgs args) {
 					for (uint32_t blendMode = 0; blendMode < BLENDMODE_COUNT; ++blendMode)
 					{
 						for (uint32_t cullMode = 0; cullMode <= 3; ++cullMode)
@@ -1911,6 +2203,8 @@ void LoadShaders()
 									continue;
 								for (uint32_t alphatest = 0; alphatest <= 1; ++alphatest)
 								{
+									if (!IsObjectPipelineRequested(renderPass, shaderType, mesh_shader, blendMode, cullMode, tessellation, alphatest))
+										continue;
 									const bool transparency = blendMode != BLENDMODE_OPAQUE;
 									if ((renderPass == RENDERPASS_PREPASS || renderPass == RENDERPASS_PREPASS_DEPTHONLY) && transparency)
 										continue;
@@ -2101,13 +2395,13 @@ void LoadShaders()
 										constexpr uint32_t msaa_support[] = { 1,2,4,8 };
 										for (uint32_t msaa : msaa_support)
 										{
+											if (!IsObjectPipelineRequested(renderPass, shaderType, mesh_shader, blendMode, cullMode, tessellation, alphatest, msaa))
+												continue;
 											variant.bits.sample_count = msaa;
 											renderpass_info.sample_count = msaa;
 											PipelineState pso;
 											device->CreatePipelineState(&desc, &pso, &renderpass_info);
-											wi::eventhandler::Subscribe_Once(wi::eventhandler::EVENT_THREAD_SAFE_POINT, [=](uint64_t userdata) {
-												*GetObjectPSO(variant) = pso;
-												});
+											PublishObjectPipeline(variant, pso);
 										}
 									}
 									break;
@@ -2130,9 +2424,7 @@ void LoadShaders()
 											renderpass_info.sample_count = msaa;
 											PipelineState pso;
 											device->CreatePipelineState(&desc, &pso, &renderpass_info);
-											wi::eventhandler::Subscribe_Once(wi::eventhandler::EVENT_THREAD_SAFE_POINT, [=](uint64_t userdata) {
-												*GetObjectPSO(variant) = pso;
-												});
+											PublishObjectPipeline(variant, pso);
 										}
 									}
 									break;
@@ -2145,9 +2437,7 @@ void LoadShaders()
 										renderpass_info.ds_format = format_depthbuffer_shadowmap;
 										PipelineState pso;
 										device->CreatePipelineState(&desc, &pso, &renderpass_info);
-										wi::eventhandler::Subscribe_Once(wi::eventhandler::EVENT_THREAD_SAFE_POINT, [=](uint64_t userdata) {
-											*GetObjectPSO(variant) = pso;
-											});
+										PublishObjectPipeline(variant, pso);
 									}
 									break;
 
@@ -2159,29 +2449,36 @@ void LoadShaders()
 										renderpass_info.ds_format = format_depthbuffer_shadowmap;
 										PipelineState pso;
 										device->CreatePipelineState(&desc, &pso, &renderpass_info);
-										wi::eventhandler::Subscribe_Once(wi::eventhandler::EVENT_THREAD_SAFE_POINT, [=](uint64_t userdata) {
-											*GetObjectPSO(variant) = pso;
-											});
+										PublishObjectPipeline(variant, pso);
 									}
 									break;
 
 									default:
 										PipelineState pso;
 										device->CreatePipelineState(&desc, &pso);
-										wi::eventhandler::Subscribe_Once(wi::eventhandler::EVENT_THREAD_SAFE_POINT, [=](uint64_t userdata) {
-											*GetObjectPSO(variant) = pso;
-											});
+									PublishObjectPipeline(variant, pso);
 										break;
 									}
 								}
 							}
 						}
 					}
-				});
+				};
+				if (object_pipeline_compilation_config.requested_only)
+				{
+					std::scoped_lock lock(requested_object_pipeline_mutex);
+					requested_object_pipeline_jobs.push_back({
+						GetRequestedObjectPipelineOrder(renderPass, shaderType, mesh_shader),
+						compileObjectPipelines
+					});
+				}
+				else
+				{
+					wi::jobsystem::Execute(object_pso_job_ctx, compileObjectPipelines);
+				}
 			}
 		}
 	}
-
 }
 int IsPipelineCreationActive()
 {
