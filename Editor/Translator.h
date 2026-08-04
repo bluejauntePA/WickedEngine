@@ -43,6 +43,12 @@ public:
 	bool tool_axis_x_enabled = true;
 	bool tool_axis_y_enabled = true;
 	bool tool_axis_z_enabled = true;
+	// Optional independent world-space rotation axes. This is intentionally
+	// rotator-only so the default translator/scalator behavior is unchanged.
+	bool tool_use_independent_rotation_axes = false;
+	XMFLOAT3 tool_rotation_axis_x = XMFLOAT3(1, 0, 0);
+	XMFLOAT3 tool_rotation_axis_y = XMFLOAT3(0, 1, 0);
+	XMFLOAT3 tool_rotation_axis_z = XMFLOAT3(0, 0, 1);
 
 	enum TRANSLATOR_STATE
 	{

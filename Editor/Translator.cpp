@@ -25,6 +25,30 @@ namespace Translator_Internal
 	constexpr float circle2_width = 0.3f;
 	constexpr float pick_tolerance = 0.3f;
 
+	XMVECTOR IndependentRotationAxis(const Translator& translator, Translator::TRANSLATOR_STATE state)
+	{
+		const XMFLOAT3* value = &translator.tool_rotation_axis_x;
+		if (state == Translator::TRANSLATOR_Y) value = &translator.tool_rotation_axis_y;
+		else if (state == Translator::TRANSLATOR_Z) value = &translator.tool_rotation_axis_z;
+		XMVECTOR axis = XMLoadFloat3(value);
+		return XMVectorGetX(XMVector3LengthSq(axis)) > 0.0000001f
+			? XMVector3Normalize(axis) : XMVectorSet(1, 0, 0, 0);
+	}
+
+	XMMATRIX RotationAxisFrame(XMVECTOR axis)
+	{
+		axis = XMVector3Normalize(axis);
+		XMVECTOR helper = std::abs(XMVectorGetX(XMVector3Dot(axis, XMVectorSet(0, 1, 0, 0)))) < 0.9f
+			? XMVectorSet(0, 1, 0, 0) : XMVectorSet(0, 0, 1, 0);
+		XMVECTOR zAxis = XMVector3Normalize(XMVector3Cross(axis, helper));
+		XMVECTOR yAxis = XMVector3Normalize(XMVector3Cross(zAxis, axis));
+		return XMMatrixSet(
+			XMVectorGetX(axis), XMVectorGetY(axis), XMVectorGetZ(axis), 0,
+			XMVectorGetX(yAxis), XMVectorGetY(yAxis), XMVectorGetZ(yAxis), 0,
+			XMVectorGetX(zAxis), XMVectorGetY(zAxis), XMVectorGetZ(zAxis), 0,
+			0, 0, 0, 1);
+	}
+
 	void LoadShaders()
 	{
 		GraphicsDevice* device = wi::graphics::GetDevice();
@@ -169,9 +193,15 @@ void Translator::Update(const CameraComponent& camera, const XMFLOAT4& currentMo
 			if (isRotator)
 			{
 				XMMATRIX localRotation = GetLocalRotation();
-				XMVECTOR localX = XMVector3TransformNormal(XMVectorSet(1, 0, 0, 0), localRotation);
-				XMVECTOR localY = XMVector3TransformNormal(XMVectorSet(0, 1, 0, 0), localRotation);
-				XMVECTOR localZ = XMVector3TransformNormal(XMVectorSet(0, 0, 1, 0), localRotation);
+				XMVECTOR localX = tool_use_independent_rotation_axes
+					? IndependentRotationAxis(*this, TRANSLATOR_X)
+					: XMVector3TransformNormal(XMVectorSet(1, 0, 0, 0), localRotation);
+				XMVECTOR localY = tool_use_independent_rotation_axes
+					? IndependentRotationAxis(*this, TRANSLATOR_Y)
+					: XMVector3TransformNormal(XMVectorSet(0, 1, 0, 0), localRotation);
+				XMVECTOR localZ = tool_use_independent_rotation_axes
+					? IndependentRotationAxis(*this, TRANSLATOR_Z)
+					: XMVector3TransformNormal(XMVectorSet(0, 0, 1, 0), localRotation);
 
 				XMVECTOR plane_zy = XMPlaneFromPointNormal(pos, localX);
 				XMVECTOR plane_xz = XMPlaneFromPointNormal(pos, localY);
@@ -327,7 +357,14 @@ void Translator::Update(const CameraComponent& camera, const XMFLOAT4& currentMo
 				XMStoreFloat3(&current, c);
 				angle = wi::math::GetAngle(original, current, axis);
 
-				switch (state)
+				if (tool_use_independent_rotation_axes && state != TRANSLATOR_XYZ)
+				{
+					const XMMATRIX frame = RotationAxisFrame(XMLoadFloat3(&axis));
+					XMFLOAT3 ref;
+					XMStoreFloat3(&ref, XMVector3TransformNormal(XMVectorSet(0, 1, 0, 0), frame));
+					angle_start = wi::math::GetAngle(ref, original, axis);
+				}
+				else switch (state)
 				{
 				case Translator::TRANSLATOR_X:
 					angle_start = wi::math::GetAngle(XMFLOAT3(0, 1, 0), original, axis);
@@ -616,11 +653,18 @@ void Translator::Draw(const CameraComponent& camera, const XMFLOAT4& currentMous
 
 	MiscCB sb;
 
-	XMMATRIX localRotation = GetLocalRotation();
+	const bool independentRotationAxes = isRotator && tool_use_independent_rotation_axes;
+	XMMATRIX localRotation = independentRotationAxes ? XMMatrixIdentity() : GetLocalRotation();
 	XMMATRIX mat = XMMatrixScaling(dist, dist, dist) * localRotation * XMMatrixTranslationFromVector(transform.GetPositionV()) * VP;
-	XMMATRIX matX = XMMatrixIdentity();
-	XMMATRIX matY = XMMatrixRotationZ(XM_PIDIV2)*XMMatrixRotationY(XM_PIDIV2);
-	XMMATRIX matZ = XMMatrixRotationY(-XM_PIDIV2)*XMMatrixRotationZ(-XM_PIDIV2);
+	XMMATRIX matX = independentRotationAxes
+		? RotationAxisFrame(IndependentRotationAxis(*this, TRANSLATOR_X))
+		: XMMatrixIdentity();
+	XMMATRIX matY = independentRotationAxes
+		? RotationAxisFrame(IndependentRotationAxis(*this, TRANSLATOR_Y))
+		: XMMatrixRotationZ(XM_PIDIV2)*XMMatrixRotationY(XM_PIDIV2);
+	XMMATRIX matZ = independentRotationAxes
+		? RotationAxisFrame(IndependentRotationAxis(*this, TRANSLATOR_Z))
+		: XMMatrixRotationY(-XM_PIDIV2)*XMMatrixRotationZ(-XM_PIDIV2);
 
 	constexpr float channel_min = 0.25f; // min color channel, to avoid pure red/green/blue
 	constexpr XMFLOAT4 highlight_color = XMFLOAT4(1, 0.6f, 0, 1);
