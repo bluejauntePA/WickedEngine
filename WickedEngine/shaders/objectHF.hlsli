@@ -1122,6 +1122,20 @@ float4 main(PixelInput input, in bool is_frontface : SV_IsFrontFace APPEND_COVER
 		color.a *= dotCoverage;
 		clip(dotCoverage - 0.001);
 	}
+	// Optional screen-space diagonal stripe mask for application overlays.
+	// userdata: x = "RPST", y = spacing in pixels, z = half-width * 100.
+	if (material.userdata.x == 0x52505354u)
+	{
+		const float spacing = max(3.0, float(material.userdata.y));
+		const float halfWidth = min(spacing * 0.45, float(material.userdata.z) * 0.01);
+		const float stripeCoordinate = input.pos.x + input.pos.y;
+		const float distanceFromCenter = abs(frac(stripeCoordinate / spacing) - 0.5) * spacing;
+		const float antialiasWidth = max(fwidth(stripeCoordinate), 0.75);
+		const float stripeCoverage = 1.0 - smoothstep(
+			halfWidth - antialiasWidth, halfWidth + antialiasWidth, distanceFromCenter);
+		color.a *= stripeCoverage;
+		clip(stripeCoverage - 0.001);
+	}
 #endif // PREPASS
 
 	half alphatest = material.GetAlphaTest() + meshinstance.GetAlphaTest();
