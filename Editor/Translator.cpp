@@ -49,6 +49,194 @@ namespace Translator_Internal
 			0, 0, 0, 1);
 	}
 
+	float PointSegmentDistanceSquared(
+		const XMFLOAT2& point,
+		const XMFLOAT2& start,
+		const XMFLOAT2& end)
+	{
+		const float dx = end.x - start.x;
+		const float dy = end.y - start.y;
+		const float lengthSquared = dx * dx + dy * dy;
+		if (lengthSquared <= 0.000001f)
+		{
+			const float px = point.x - start.x;
+			const float py = point.y - start.y;
+			return px * px + py * py;
+		}
+		const float t = std::clamp(
+			((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared,
+			0.0f, 1.0f);
+		const float px = point.x - (start.x + dx * t);
+		const float py = point.y - (start.y + dy * t);
+		return px * px + py * py;
+	}
+
+	struct PlaneHandlePick
+	{
+		bool hit = false;
+		float screenDistanceSquared = std::numeric_limits<float>::max();
+		float depth = std::numeric_limits<float>::max();
+	};
+
+	PlaneHandlePick PickPlaneHandle(
+		const CameraComponent& camera,
+		const wi::Canvas& canvas,
+		const XMFLOAT4& currentMouse,
+		XMVECTOR corner0,
+		XMVECTOR corner1,
+		XMVECTOR corner2,
+		XMVECTOR corner3)
+	{
+		PlaneHandlePick result;
+		const float width = canvas.GetLogicalWidth();
+		const float height = canvas.GetLogicalHeight();
+		if (width <= 0 || height <= 0)
+			return result;
+
+		const XMMATRIX identity = XMMatrixIdentity();
+		const XMMATRIX view = camera.GetView();
+		const XMMATRIX projection = camera.GetProjection();
+		XMFLOAT3 projected3[4];
+		const XMVECTOR corners[4] = { corner0, corner1, corner2, corner3 };
+		for (uint32_t i = 0; i < 4; ++i)
+		{
+			XMStoreFloat3(&projected3[i], XMVector3Project(
+				corners[i], 0, 0, width, height, 0.0f, 1.0f,
+				projection, view, identity));
+			if (projected3[i].z < 0.0f || projected3[i].z > 1.0f)
+				return result;
+			result.depth = std::min(result.depth, projected3[i].z);
+		}
+
+		XMFLOAT2 projected[4];
+		for (uint32_t i = 0; i < 4; ++i)
+			projected[i] = XMFLOAT2(projected3[i].x, projected3[i].y);
+		const XMFLOAT2 mouse(currentMouse.x, currentMouse.y);
+
+		bool hasPositiveCross = false;
+		bool hasNegativeCross = false;
+		float doubleArea = 0.0f;
+		for (uint32_t i = 0; i < 4; ++i)
+		{
+			const XMFLOAT2& start = projected[i];
+			const XMFLOAT2& end = projected[(i + 1) % 4];
+			const float cross = (end.x - start.x) * (mouse.y - start.y)
+				- (end.y - start.y) * (mouse.x - start.x);
+			hasPositiveCross |= cross > 0.01f;
+			hasNegativeCross |= cross < -0.01f;
+			doubleArea += start.x * end.y - end.x * start.y;
+			result.screenDistanceSquared = std::min(
+				result.screenDistanceSquared,
+				PointSegmentDistanceSquared(mouse, start, end));
+		}
+
+		const bool hasArea = std::abs(doubleArea) > 1.0f;
+		const bool inside = hasArea && !(hasPositiveCross && hasNegativeCross);
+		if (inside)
+			result.screenDistanceSquared = 0.0f;
+		constexpr float edgeTolerancePixels = 5.0f;
+		result.hit = inside || result.screenDistanceSquared
+			<= edgeTolerancePixels * edgeTolerancePixels;
+		return result;
+	}
+
+	struct RotationRingPick
+	{
+		bool hit = false;
+		float screenDistanceSquared = std::numeric_limits<float>::max();
+		float depth = std::numeric_limits<float>::max();
+	};
+
+	RotationRingPick PickRotationRing(
+		const CameraComponent& camera,
+		const wi::Canvas& canvas,
+		const XMFLOAT4& currentMouse,
+		XMVECTOR pivot,
+		XMVECTOR normal,
+		float scale,
+		float ringWidth,
+		bool frontFacingOnly)
+	{
+		RotationRingPick result;
+		const float width = canvas.GetLogicalWidth();
+		const float height = canvas.GetLogicalHeight();
+		if (width <= 0 || height <= 0)
+			return result;
+
+		normal = XMVector3Normalize(normal);
+		const XMMATRIX frame = RotationAxisFrame(normal);
+		const XMMATRIX view = camera.GetView();
+		const XMMATRIX projection = camera.GetProjection();
+		const XMMATRIX identity = XMMatrixIdentity();
+		const float ringRadius = circle_radius - ringWidth * 0.5f;
+		const XMVECTOR viewToCamera = camera.GetEye() - pivot;
+		const XMVECTOR planarView = viewToCamera
+			- normal * XMVectorGetX(XMVector3Dot(viewToCamera, normal));
+		const bool cullBack = frontFacingOnly
+			&& XMVectorGetX(XMVector3LengthSq(planarView)) > 0.000001f;
+
+		auto worldPoint = [&](float angle) {
+			const XMVECTOR local = XMVectorSet(
+				0, std::sin(angle) * ringRadius, std::cos(angle) * ringRadius, 0);
+			return pivot + XMVector3TransformNormal(local, frame) * scale;
+		};
+		auto projectPoint = [&](XMVECTOR point, XMFLOAT3& projected) {
+			XMStoreFloat3(&projected, XMVector3Project(
+				point, 0, 0, width, height, 0.0f, 1.0f,
+				projection, view, identity));
+			return projected.z >= 0.0f && projected.z <= 1.0f;
+		};
+
+		XMFLOAT3 centerScreen;
+		XMFLOAT3 radiusScreen0;
+		XMFLOAT3 radiusScreen1;
+		if (!projectPoint(pivot, centerScreen)
+			|| !projectPoint(worldPoint(0), radiusScreen0)
+			|| !projectPoint(worldPoint(XM_PIDIV2), radiusScreen1))
+			return result;
+		const auto screenRadius = [&](const XMFLOAT3& point) {
+			const float dx = point.x - centerScreen.x;
+			const float dy = point.y - centerScreen.y;
+			return std::sqrt(dx * dx + dy * dy);
+		};
+		const float radiusPixels = std::max(
+			screenRadius(radiusScreen0), screenRadius(radiusScreen1));
+		const float rangePixels = std::max(4.0f,
+			radiusPixels * std::max(
+				ringWidth * 0.5f, pick_tolerance) / circle_radius);
+		const XMFLOAT2 mouse(currentMouse.x, currentMouse.y);
+
+		constexpr uint32_t segmentCount = 90;
+		for (uint32_t i = 0; i < segmentCount; ++i)
+		{
+			const float angle0 = (float)i / (float)segmentCount * XM_2PI;
+			const float angle1 = (float)(i + 1) / (float)segmentCount * XM_2PI;
+			const float middle = (angle0 + angle1) * 0.5f;
+			if (cullBack)
+			{
+				const XMVECTOR midpoint = worldPoint(middle) - pivot;
+				if (XMVectorGetX(XMVector3Dot(midpoint, planarView)) < 0)
+					continue;
+			}
+
+			XMFLOAT3 point0;
+			XMFLOAT3 point1;
+			if (!projectPoint(worldPoint(angle0), point0)
+				|| !projectPoint(worldPoint(angle1), point1))
+				continue;
+			const float distanceSquared = PointSegmentDistanceSquared(
+				mouse, XMFLOAT2(point0.x, point0.y), XMFLOAT2(point1.x, point1.y));
+			if (distanceSquared < result.screenDistanceSquared)
+			{
+				result.screenDistanceSquared = distanceSquared;
+				result.depth = (point0.z + point1.z) * 0.5f;
+			}
+		}
+
+		result.hit = result.screenDistanceSquared <= rangePixels * rangePixels;
+		return result;
+	}
+
 	void LoadShaders()
 	{
 		GraphicsDevice* device = wi::graphics::GetDevice();
@@ -172,6 +360,24 @@ void Translator::Update(const CameraComponent& camera, const XMFLOAT4& currentMo
 			return;
 		}
 
+		if (!dragging)
+		{
+			const XMFLOAT3 p = transform.GetPosition();
+			// Size from the camera projection, not from the manipulator interaction
+			// mode. A perspective viewport can use the 2D screen-space rotation ring,
+			// and it still needs distance scaling to remain constant on screen.
+			dist = camera.IsOrtho()
+				? camera.ortho_vertical_size * 0.025f * tool_scale
+				: std::max(wi::math::Distance(p, camera.Eye) * 0.05f, 0.0001f) * tool_scale;
+		}
+
+		if (!tool_interaction_enabled)
+		{
+			state = TRANSLATOR_IDLE;
+			dragging = false;
+			return;
+		}
+
 		const Ray ray = wi::renderer::GetPickRay((long)currentMouse.x, (long)currentMouse.y, canvas, camera);
 		const XMVECTOR rayOrigin = XMLoadFloat3(&ray.origin);
 		const XMVECTOR rayDir = XMLoadFloat3(&ray.direction);
@@ -182,13 +388,6 @@ void Translator::Update(const CameraComponent& camera, const XMFLOAT4& currentMo
 
 			// Decide which state to enter for dragging:
 			XMFLOAT3 p = transform.GetPosition();
-
-			// Size from the camera projection, not from the manipulator interaction
-			// mode. A perspective viewport can use the 2D screen-space rotation ring,
-			// and it still needs distance scaling to remain constant on screen.
-			dist = camera.IsOrtho()
-				? camera.ortho_vertical_size * 0.025f * tool_scale
-				: std::max(wi::math::Distance(p, camera.Eye) * 0.05f, 0.0001f) * tool_scale;
 
 			if (isRotator)
 			{
@@ -218,8 +417,10 @@ void Translator::Update(const CameraComponent& camera, const XMFLOAT4& currentMo
 				float len_z = XMVectorGetX(XMVector3Length(intersection - pos)) / dist;
 
 				const float thick = tool_thickness;
-				float range = std::max(circle_width * thick * 0.5f, pick_tolerance);
-				float perimeter = circle_radius - circle_width * thick * 0.5f;
+				const float axisRingWidth = (tool_rotation_ring_tube_sides >= 3
+					? circle2_width : circle_width) * thick;
+				float range = std::max(axisRingWidth * 0.5f, pick_tolerance);
+				float perimeter = circle_radius - axisRingWidth * 0.5f;
 				float best_dist = std::numeric_limits<float>::max();
 
 				if (!is2D)
@@ -244,12 +445,43 @@ void Translator::Update(const CameraComponent& camera, const XMFLOAT4& currentMo
 					best_dist = dist_z;
 				}
 
+				if (!is2D && (tool_rotation_front_facing_only
+					|| tool_rotation_ring_tube_sides >= 3))
+				{
+					state = TRANSLATOR_IDLE;
+					float bestScreenDistance = std::numeric_limits<float>::max();
+					float bestScreenDepth = std::numeric_limits<float>::max();
+					auto tryRing = [&](TRANSLATOR_STATE candidate, XMVECTOR candidateAxis) {
+						const RotationRingPick pick = PickRotationRing(
+							camera, canvas, currentMouse, pos, candidateAxis, dist,
+							axisRingWidth,
+							tool_rotation_front_facing_only);
+						if (!pick.hit)
+							return;
+						const bool closerToPointer = pick.screenDistanceSquared
+							< bestScreenDistance - 1.0f;
+						const bool samePointerDistance = std::abs(
+							pick.screenDistanceSquared - bestScreenDistance) <= 1.0f;
+						if (!closerToPointer
+							&& !(samePointerDistance && pick.depth < bestScreenDepth))
+							return;
+						state = candidate;
+						XMStoreFloat3(&axis, candidateAxis);
+						bestScreenDistance = pick.screenDistanceSquared;
+						bestScreenDepth = pick.depth;
+					};
+					if (tool_axis_x_enabled) tryRing(TRANSLATOR_X, localX);
+					if (tool_axis_y_enabled) tryRing(TRANSLATOR_Y, localY);
+					if (tool_axis_z_enabled) tryRing(TRANSLATOR_Z, localZ);
+				}
+
 				XMVECTOR screen_normal = XMVector3Normalize(camera.GetEye() - pos);
 				XMVECTOR plane_screen = XMPlaneFromPointNormal(pos, screen_normal);
 				intersection = XMPlaneIntersectLine(plane_screen, rayOrigin, rayOrigin + rayDir * camera.zFarP);
 				float len_screen = XMVectorGetX(XMVector3Length(intersection - pos)) / dist;
-				range = std::max(circle2_width * thick * 0.5f, pick_tolerance);
-				perimeter = circle2_radius - circle2_width * thick * 0.5f;
+				const float freeRingWidth = circle2_width * thick;
+				range = std::max(freeRingWidth * 0.5f, pick_tolerance);
+				perimeter = circle2_radius - freeRingWidth * 0.5f;
 				if ((tool_axis_x_enabled || tool_axis_y_enabled || tool_axis_z_enabled)
 					&& std::abs(perimeter - len_screen) <= range)
 				{
@@ -304,7 +536,62 @@ void Translator::Update(const CameraComponent& camera, const XMFLOAT4& currentMo
 					state = TRANSLATOR_Z;
 				}
 
-				if (isTranslator && state != TRANSLATOR_XYZ)
+				if (isTranslator && tool_use_screen_space_plane_picking)
+				{
+					float bestScreenDistance = std::numeric_limits<float>::max();
+					float bestScreenDepth = std::numeric_limits<float>::max();
+					auto tryPlane = [&](TRANSLATOR_STATE candidate,
+						XMVECTOR corner0, XMVECTOR corner1,
+						XMVECTOR corner2, XMVECTOR corner3) {
+						const PlaneHandlePick pick = PickPlaneHandle(
+							camera, canvas, currentMouse,
+							corner0, corner1, corner2, corner3);
+						if (!pick.hit)
+							return;
+						const bool closerToPointer = pick.screenDistanceSquared
+							< bestScreenDistance - 1.0f;
+						const bool samePointerDistance = std::abs(
+							pick.screenDistanceSquared - bestScreenDistance) <= 1.0f;
+						if (!closerToPointer
+							&& !(samePointerDistance && pick.depth < bestScreenDepth))
+							return;
+						state = candidate;
+						bestScreenDistance = pick.screenDistanceSquared;
+						bestScreenDepth = pick.depth;
+					};
+					auto planeCorner = [&](TRANSLATOR_STATE candidate,
+						float x, float y, float z) {
+						return pos + XMVector3Transform(
+							XMVectorSet(x, y, z, 0) * dist,
+							localRotation * GetMirrorMatrix(candidate, camera));
+					};
+
+					if (tool_axis_x_enabled && tool_axis_y_enabled)
+					{
+						tryPlane(TRANSLATOR_XY,
+							planeCorner(TRANSLATOR_XY, plane_min, plane_min, 0),
+							planeCorner(TRANSLATOR_XY, plane_max, plane_min, 0),
+							planeCorner(TRANSLATOR_XY, plane_max, plane_max, 0),
+							planeCorner(TRANSLATOR_XY, plane_min, plane_max, 0));
+					}
+					if (!is2D && tool_axis_x_enabled && tool_axis_z_enabled)
+					{
+						tryPlane(TRANSLATOR_XZ,
+							planeCorner(TRANSLATOR_XZ, plane_min, 0, plane_min),
+							planeCorner(TRANSLATOR_XZ, plane_max, 0, plane_min),
+							planeCorner(TRANSLATOR_XZ, plane_max, 0, plane_max),
+							planeCorner(TRANSLATOR_XZ, plane_min, 0, plane_max));
+					}
+					if (!is2D && tool_axis_y_enabled && tool_axis_z_enabled)
+					{
+						tryPlane(TRANSLATOR_YZ,
+							planeCorner(TRANSLATOR_YZ, 0, plane_min, plane_min),
+							planeCorner(TRANSLATOR_YZ, 0, plane_max, plane_min),
+							planeCorner(TRANSLATOR_YZ, 0, plane_max, plane_max),
+							planeCorner(TRANSLATOR_YZ, 0, plane_min, plane_max));
+					}
+				}
+				else if (isTranslator && state != TRANSLATOR_XYZ)
 				{
 					// these can overlap, so take closest one (by checking plane ray trace distance):
 					XMVECTOR N = XMVector3TransformNormal(XMVectorSet(0, 0, 1, 0), localRotation);
@@ -670,6 +957,127 @@ void Translator::Draw(const CameraComponent& camera, const XMFLOAT4& currentMous
 	constexpr XMFLOAT4 highlight_color = XMFLOAT4(1, 0.6f, 0, 1);
 
 	// Axes:
+	if (isRotator && !is2D && (tool_rotation_front_facing_only
+		|| tool_rotation_ring_tube_sides >= 3))
+	{
+		device->BindPipelineState(&pso_solidpart, cmd);
+		const XMVECTOR pivot = transform.GetPositionV();
+		const XMVECTOR viewToCamera = camera.GetEye() - pivot;
+		const bool isolateActiveRing = dragging
+			&& state != TRANSLATOR_IDLE && state != TRANSLATOR_XYZ;
+
+		auto drawRing = [&](TRANSLATOR_STATE candidate, const XMMATRIX& axisFrame,
+			const XMFLOAT4& baseColor) {
+			if (dragging && state == TRANSLATOR_XYZ)
+				return;
+			if (isolateActiveRing && state != candidate)
+				return;
+
+			const XMMATRIX mirror = GetMirrorMatrix(candidate, camera);
+			const XMMATRIX ringOrientation = axisFrame * mirror * localRotation;
+			const XMVECTOR ringNormal = XMVector3Normalize(XMVector3TransformNormal(
+				XMVectorSet(1, 0, 0, 0), ringOrientation));
+			const XMVECTOR planarView = viewToCamera
+				- ringNormal * XMVectorGetX(XMVector3Dot(viewToCamera, ringNormal));
+			const bool cullBack = tool_rotation_front_facing_only && !dragging
+				&& XMVectorGetX(XMVector3LengthSq(planarView)) > 0.000001f;
+			const float ringWidth = circle2_width * tool_thickness;
+			const float centerRadius = circle_radius - ringWidth * 0.5f;
+			constexpr uint32_t segmentCount = 90;
+			const uint32_t tubeSides = tool_rotation_ring_tube_sides >= 3
+				? std::clamp(tool_rotation_ring_tube_sides, 3u, 16u) : 0u;
+			std::vector<Vertex> vertices;
+			vertices.reserve(segmentCount * (tubeSides > 0 ? tubeSides * 6 : 6));
+
+			auto appendVertex = [&](float angle, float tubeAngle) {
+				const float radialOffset = tubeSides > 0
+					? std::cos(tubeAngle) * ringWidth * 0.5f : 0.0f;
+				const float axialOffset = tubeSides > 0
+					? std::sin(tubeAngle) * ringWidth * 0.5f : 0.0f;
+				const float radius = centerRadius + radialOffset;
+				vertices.push_back({ XMFLOAT4(
+					axialOffset,
+					std::sin(angle) * radius,
+					std::cos(angle) * radius,
+					1), XMFLOAT4(1, 1, 1, 1) });
+			};
+
+			for (uint32_t i = 0; i < segmentCount; ++i)
+			{
+				const float angle0 = (float)i / (float)segmentCount * XM_2PI;
+				const float angle1 = (float)(i + 1) / (float)segmentCount * XM_2PI;
+				const float middle = (angle0 + angle1) * 0.5f;
+				if (cullBack)
+				{
+					const XMVECTOR localMidpoint = XMVectorSet(
+						0, std::sin(middle) * centerRadius,
+						std::cos(middle) * centerRadius, 0);
+					const XMVECTOR worldMidpoint = XMVector3TransformNormal(
+						localMidpoint, ringOrientation);
+					if (XMVectorGetX(XMVector3Dot(worldMidpoint, planarView)) < 0)
+						continue;
+				}
+
+				if (tubeSides > 0)
+				{
+					for (uint32_t side = 0; side < tubeSides; ++side)
+					{
+						const float tube0 = (float)side / (float)tubeSides * XM_2PI;
+						const float tube1 = (float)(side + 1) / (float)tubeSides * XM_2PI;
+						appendVertex(angle0, tube0);
+						appendVertex(angle1, tube0);
+						appendVertex(angle0, tube1);
+						appendVertex(angle0, tube1);
+						appendVertex(angle1, tube0);
+						appendVertex(angle1, tube1);
+					}
+				}
+				else
+				{
+					const float innerRadius = circle_radius - ringWidth;
+					vertices.push_back({ XMFLOAT4(0, std::sin(angle0) * innerRadius, std::cos(angle0) * innerRadius, 1), XMFLOAT4(1,1,1,1) });
+					vertices.push_back({ XMFLOAT4(0, std::sin(angle1) * innerRadius, std::cos(angle1) * innerRadius, 1), XMFLOAT4(1,1,1,1) });
+					vertices.push_back({ XMFLOAT4(0, std::sin(angle0) * circle_radius, std::cos(angle0) * circle_radius, 1), XMFLOAT4(1,1,1,1) });
+					vertices.push_back({ XMFLOAT4(0, std::sin(angle0) * circle_radius, std::cos(angle0) * circle_radius, 1), XMFLOAT4(1,1,1,1) });
+					vertices.push_back({ XMFLOAT4(0, std::sin(angle1) * circle_radius, std::cos(angle1) * circle_radius, 1), XMFLOAT4(1,1,1,1) });
+					vertices.push_back({ XMFLOAT4(0, std::sin(angle1) * innerRadius, std::cos(angle1) * innerRadius, 1), XMFLOAT4(1,1,1,1) });
+				}
+			}
+
+			if (vertices.empty())
+				return;
+			const GraphicsDevice::GPUAllocation mem = device->AllocateGPU(
+				sizeof(Vertex) * vertices.size(), cmd);
+			std::memcpy(mem.data, vertices.data(), sizeof(Vertex) * vertices.size());
+			const GPUBuffer* vertexBuffers[] = { &mem.buffer };
+			constexpr uint32_t strides[] = { sizeof(Vertex) };
+			const uint64_t offsets[] = { mem.offset };
+			device->BindVertexBuffers(vertexBuffers, 0, arraysize(vertexBuffers), strides, offsets, cmd);
+			XMStoreFloat4x4(&sb.g_xTransform, axisFrame * mirror * mat);
+			sb.g_xColor = state == candidate && !dragging ? highlight_color : baseColor;
+			sb.g_xColor.w *= tool_opacity;
+			device->BindDynamicConstantBuffer(sb, CBSLOT_RENDERER_MISC, cmd);
+			device->Draw((uint32_t)vertices.size(), 0, cmd);
+		};
+
+		float darken = 1;
+		if (tool_axis_x_enabled)
+		{
+			darken = isLocalSpace ? 1 : (camera.Eye.x < transform.translation_local.x ? tool_darken_negative_axes : 1);
+			drawRing(TRANSLATOR_X, matX, XMFLOAT4(darken, channel_min * darken, channel_min * darken, 1));
+		}
+		if (tool_axis_y_enabled)
+		{
+			darken = isLocalSpace ? 1 : (camera.Eye.y < transform.translation_local.y ? tool_darken_negative_axes : 1);
+			drawRing(TRANSLATOR_Y, matY, XMFLOAT4(channel_min * darken, darken, channel_min * darken, 1));
+		}
+		if (tool_axis_z_enabled)
+		{
+			darken = isLocalSpace ? 1 : (camera.Eye.z < transform.translation_local.z ? tool_darken_negative_axes : 1);
+			drawRing(TRANSLATOR_Z, matZ, XMFLOAT4(channel_min * darken, channel_min * darken, darken, 1));
+		}
+	}
+	else
 	{
 		device->BindPipelineState(&pso_solidpart, cmd);
 
@@ -689,7 +1097,8 @@ void Translator::Draw(const CameraComponent& camera, const XMFLOAT4& currentMous
 				const float angle1 = (float)(i + 1) / (float)segmentCount * XM_2PI;
 
 				// circle:
-				const float cw = circle_width * tool_thickness;
+				const float cw = (tool_rotation_ring_tube_sides >= 3
+					? circle2_width : circle_width) * tool_thickness;
 				const float circle_radius_inner = circle_radius - cw;
 				const Vertex verts[] = {
 					{XMFLOAT4(0, std::sin(angle0) * circle_radius_inner, std::cos(angle0) * circle_radius_inner, 1), XMFLOAT4(1,1,1,1)},
@@ -827,7 +1236,8 @@ void Translator::Draw(const CameraComponent& camera, const XMFLOAT4& currentMous
 
 	}
 
-	if (isRotator && !is2D)
+	if (isRotator && !is2D
+		&& (!dragging || state == TRANSLATOR_XYZ))
 	{
 		// Another circle for rotator, a bit thinner and screen facing, so new geo:
 		constexpr uint32_t segmentCount = 90;
@@ -872,7 +1282,8 @@ void Translator::Draw(const CameraComponent& camera, const XMFLOAT4& currentMous
 			XMMatrixInverse(nullptr, XMMatrixLookToLH(XMVectorZero(), XMVector3Normalize(transform.GetPositionV() - camera.GetEye()), camera.GetUp())) *
 			mat_no_localrot
 		);
-		sb.g_xColor = state == TRANSLATOR_XYZ ? highlight_color : XMFLOAT4(1, 1, 1, 0.5f);
+		sb.g_xColor = state == TRANSLATOR_XYZ && !dragging
+			? highlight_color : XMFLOAT4(1, 1, 1, dragging ? 1.0f : 0.5f);
 		sb.g_xColor.w *= tool_opacity;
 		device->BindDynamicConstantBuffer(sb, CBSLOT_RENDERER_MISC, cmd);
 		device->Draw(vertexCount, 0, cmd);
@@ -1204,7 +1615,9 @@ void Translator::Draw(const CameraComponent& camera, const XMFLOAT4& currentMous
 				const float angle0 = (float)i / (float)segmentCount * angle + angle_start;
 				const float angle1 = (float)(i + 1) / (float)segmentCount * angle + angle_start;
 
-				const float radius = state == TRANSLATOR_XYZ ? (circle2_radius - circle2_width * tool_thickness) : (circle_radius - circle_width * tool_thickness);
+				const float ringWidth = circle2_width * tool_thickness;
+				const float radius = state == TRANSLATOR_XYZ
+					? circle2_radius - ringWidth : circle_radius - ringWidth;
 				const Vertex verts[] = {
 					{XMFLOAT4(0, 0, 0, 1), XMFLOAT4(1,1,1,1)},
 					{XMFLOAT4(0, std::cos(angle0) * radius, std::sin(angle0) * radius, 1), XMFLOAT4(1,1,1,1)},

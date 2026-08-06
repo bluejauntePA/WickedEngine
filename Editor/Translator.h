@@ -43,6 +43,16 @@ public:
 	bool tool_axis_x_enabled = true;
 	bool tool_axis_y_enabled = true;
 	bool tool_axis_z_enabled = true;
+	// Keep visual transforms current while another UI surface owns input.
+	bool tool_interaction_enabled = true;
+	// Optional projected plane-handle picking. This keeps thin, edge-on plane
+	// handles selectable and only lets them override the origin where visible.
+	bool tool_use_screen_space_plane_picking = false;
+	// Optional rotation-ring presentation for compact posing tools. The front
+	// hemisphere test is camera-relative, and tube sides give edge-on rings a
+	// real silhouette instead of allowing a flat annulus to collapse to a line.
+	bool tool_rotation_front_facing_only = false;
+	uint32_t tool_rotation_ring_tube_sides = 0;
 	// Optional independent world-space rotation axes. This is intentionally
 	// rotator-only so the default translator/scalator behavior is unchanged.
 	bool tool_use_independent_rotation_axes = false;
