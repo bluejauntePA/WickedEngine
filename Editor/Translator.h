@@ -45,6 +45,10 @@ public:
 	bool tool_axis_z_enabled = true;
 	// Keep visual transforms current while another UI surface owns input.
 	bool tool_interaction_enabled = true;
+	// Optional Blender-style view trackball, picked from a compact center target.
+	bool tool_trackball_enabled = false;
+	float tool_trackball_radius = 0.65f;
+	float tool_trackball_sensitivity = 0.01f;
 	// Optional projected plane-handle picking. This keeps thin, edge-on plane
 	// handles selectable and only lets them override the origin where visible.
 	bool tool_use_screen_space_plane_picking = false;
@@ -69,13 +73,21 @@ public:
 		TRANSLATOR_XY,
 		TRANSLATOR_XZ,
 		TRANSLATOR_YZ,
+		TRANSLATOR_TRACKBALL,
 		TRANSLATOR_XYZ,
 	} state = TRANSLATOR_IDLE;
+
+	// Current Blender-style trackball values, exposed for application feedback
+	// and for consumers that solve rotations outside this helper.
+	XMFLOAT2 trackball_delta_radians = XMFLOAT2(0, 0);
+	XMFLOAT3 trackball_axis = XMFLOAT3(1, 0, 0);
+	float trackball_angle = 0.0f;
 
 	XMMATRIX GetMirrorMatrix(TRANSLATOR_STATE state, const wi::scene::CameraComponent& camera) const;
 	void WriteAxisText(TRANSLATOR_STATE axis, const wi::scene::CameraComponent& camera, char* text) const;
 
 	float dist = 1;
+	XMFLOAT2 trackball_mouse_start = XMFLOAT2(0, 0);
 
 	bool isTranslator = true;
 	bool isScalator = false;

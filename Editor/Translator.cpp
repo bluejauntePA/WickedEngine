@@ -482,7 +482,13 @@ void Translator::Update(const CameraComponent& camera, const XMFLOAT4& currentMo
 				const float freeRingWidth = circle2_width * thick;
 				range = std::max(freeRingWidth * 0.5f, pick_tolerance);
 				perimeter = circle2_radius - freeRingWidth * 0.5f;
-				if ((tool_axis_x_enabled || tool_axis_y_enabled || tool_axis_z_enabled)
+				if (tool_trackball_enabled
+					&& (tool_axis_x_enabled || tool_axis_y_enabled || tool_axis_z_enabled)
+					&& len_screen <= tool_trackball_radius)
+				{
+					state = TRANSLATOR_TRACKBALL;
+				}
+				else if ((tool_axis_x_enabled || tool_axis_y_enabled || tool_axis_z_enabled)
 					&& std::abs(perimeter - len_screen) <= range)
 				{
 					state = TRANSLATOR_XYZ;
@@ -626,6 +632,44 @@ void Translator::Update(const CameraComponent& camera, const XMFLOAT4& currentMo
 			// Dragging operation:
 			if (isRotator)
 			{
+				if (state == TRANSLATOR_TRACKBALL)
+				{
+					if (!dragging)
+					{
+						dragStarted = true;
+						transform_start = transform;
+						trackball_mouse_start = XMFLOAT2(currentMouse.x, currentMouse.y);
+						matrices_start = matrices_current;
+					}
+
+					trackball_delta_radians = XMFLOAT2(
+						(trackball_mouse_start.y - currentMouse.y) * tool_trackball_sensitivity,
+						(trackball_mouse_start.x - currentMouse.x) * tool_trackball_sensitivity);
+					if (wi::input::Down(wi::input::BUTTON::KEYBOARD_BUTTON_LCONTROL))
+					{
+						constexpr float trackballSnap = XM_PI / 36.0f;
+						trackball_delta_radians.x = std::round(
+							trackball_delta_radians.x / trackballSnap) * trackballSnap;
+						trackball_delta_radians.y = std::round(
+							trackball_delta_radians.y / trackballSnap) * trackballSnap;
+					}
+					XMVECTOR trackballAxis = camera.GetRight() * trackball_delta_radians.x
+						+ camera.GetUp() * trackball_delta_radians.y;
+					trackball_angle = XMVectorGetX(XMVector3Length(trackballAxis));
+					if (trackball_angle > 0.000001f)
+					{
+						trackballAxis = XMVector3Normalize(trackballAxis);
+						XMStoreFloat3(&trackball_axis, trackballAxis);
+					}
+					transform = transform_start;
+					if (trackball_angle > 0.000001f)
+					{
+						transform.Rotate(XMQuaternionRotationAxis(
+							XMLoadFloat3(&trackball_axis), trackball_angle));
+					}
+				}
+				else
+				{
 				XMVECTOR intersection = XMPlaneIntersectLine(XMPlaneFromPointNormal(pos, XMLoadFloat3(&axis)), rayOrigin, rayOrigin + rayDir * camera.zFarP);
 
 				if (!dragging)
@@ -683,6 +727,7 @@ void Translator::Update(const CameraComponent& camera, const XMFLOAT4& currentMo
 
 				transform = transform_start;
 				transform.Rotate(XMQuaternionRotationAxis(XMLoadFloat3(&axis), angle));
+				}
 			}
 			else
 			{
@@ -1289,6 +1334,48 @@ void Translator::Draw(const CameraComponent& camera, const XMFLOAT4& currentMous
 		device->Draw(vertexCount, 0, cmd);
 	}
 
+	if (isRotator && tool_trackball_enabled
+		&& state == TRANSLATOR_TRACKBALL)
+	{
+		device->BindPipelineState(&pso_solidpart, cmd);
+		constexpr uint32_t segmentCount = 48;
+		constexpr uint32_t vertexCount = segmentCount * 3;
+		GraphicsDevice::GPUAllocation mem = device->AllocateGPU(
+			sizeof(Vertex) * vertexCount, cmd);
+		uint8_t* dst = static_cast<uint8_t*>(mem.data);
+		for (uint32_t i = 0; i < segmentCount; ++i)
+		{
+			const float angle0 = static_cast<float>(i) / segmentCount * XM_2PI;
+			const float angle1 = static_cast<float>(i + 1) / segmentCount * XM_2PI;
+			const Vertex verts[] = {
+				{ XMFLOAT4(0, 0, 0, 1), XMFLOAT4(1, 1, 1, 1) },
+				{ XMFLOAT4(0, std::cos(angle0) * tool_trackball_radius,
+					std::sin(angle0) * tool_trackball_radius, 1), XMFLOAT4(1, 1, 1, 1) },
+				{ XMFLOAT4(0, std::cos(angle1) * tool_trackball_radius,
+					std::sin(angle1) * tool_trackball_radius, 1), XMFLOAT4(1, 1, 1, 1) },
+			};
+			std::memcpy(dst, verts, sizeof(verts));
+			dst += sizeof(verts);
+		}
+		const GPUBuffer* vertexBuffers[] = { &mem.buffer };
+		constexpr uint32_t strides[] = { sizeof(Vertex) };
+		const uint64_t offsets[] = { mem.offset };
+		device->BindVertexBuffers(
+			vertexBuffers, 0, arraysize(vertexBuffers), strides, offsets, cmd);
+		const XMMATRIX matNoLocalRotation = XMMatrixScaling(dist, dist, dist)
+			* XMMatrixTranslationFromVector(transform.GetPositionV()) * VP;
+		XMStoreFloat4x4(&sb.g_xTransform,
+			XMMatrixRotationY(XM_PIDIV2)
+			* XMMatrixInverse(nullptr, XMMatrixLookToLH(
+				XMVectorZero(), XMVector3Normalize(
+					transform.GetPositionV() - camera.GetEye()), camera.GetUp()))
+			* matNoLocalRotation);
+		sb.g_xColor = XMFLOAT4(1.0f, 0.68f, 0.08f, dragging ? 0.42f : 0.30f);
+		sb.g_xColor.w *= tool_opacity;
+		device->BindDynamicConstantBuffer(sb, CBSLOT_RENDERER_MISC, cmd);
+		device->Draw(vertexCount, 0, cmd);
+	}
+
 	// Origin:
 	if(!isRotator)
 	{
@@ -1579,7 +1666,7 @@ void Translator::Draw(const CameraComponent& camera, const XMFLOAT4& currentMous
 				device->Draw(arraysize(verts), 0, cmd);
 			}
 		}
-		else if (isRotator)
+		else if (isRotator && state != TRANSLATOR_TRACKBALL)
 		{
 			device->BindPipelineState(&pso_solidpart, cmd);
 
