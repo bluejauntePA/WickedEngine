@@ -56,6 +56,7 @@ Shader				shaders[SHADERTYPE_COUNT];
 Texture				textures[TEXTYPE_COUNT];
 InputLayout			inputLayouts[ILTYPE_COUNT];
 RasterizerState		rasterizers[RSTYPE_COUNT];
+RasterizerState		gridRasterizerMSAA;
 DepthStencilState	depthStencils[DSSTYPE_COUNT];
 BlendState			blendStates[BSTYPE_COUNT];
 GPUBuffer			buffers[BUFFERTYPE_COUNT];
@@ -1955,7 +1956,7 @@ void LoadShaders()
 			desc.ps = &shaders[PSTYPE_VERTEXCOLOR];
 			desc.il = &inputLayouts[ILTYPE_VERTEXCOLOR];
 			desc.dss = &depthStencils[DSSTYPE_DEPTHREAD];
-			desc.rs = &rasterizers[RSTYPE_WIRE_DOUBLESIDED_SMOOTH];
+			desc.rs = &gridRasterizerMSAA;
 			desc.bs = &blendStates[BSTYPE_TRANSPARENT];
 			desc.pt = PrimitiveTopology::LINELIST;
 			break;
@@ -2621,6 +2622,11 @@ void SetUpStates()
 	rasterizers[RSTYPE_WIRE_DOUBLESIDED] = rs;
 	rs.antialiased_line_enable = true;
 	rasterizers[RSTYPE_WIRE_DOUBLESIDED_SMOOTH] = rs;
+	// The grid is rendered into the scene's multisampled target. Select the
+	// quadrilateral line algorithm so its coverage is resolved from all samples
+	// instead of relying on the implementation-defined alpha line algorithm.
+	rs.multisample_enable = true;
+	gridRasterizerMSAA = rs;
 
 	rs.fill_mode = FillMode::SOLID;
 	rs.cull_mode = CullMode::FRONT;
