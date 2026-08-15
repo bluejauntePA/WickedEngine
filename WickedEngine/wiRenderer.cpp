@@ -123,6 +123,7 @@ bool debugSprings = false;
 bool gridHelper = false;
 XMFLOAT4 gridHelperColor = XMFLOAT4(1, 1, 1, 0.75f);
 bool gridHelper2D = false;
+float gridHelperHeight = 0.01f;
 bool advancedLightCulling = true;
 bool variableRateShadingClassification = false;
 bool variableRateShadingClassificationDebug = false;
@@ -8876,7 +8877,7 @@ void DrawDebugWorld(
 			XMFLOAT4 color1;
 		};
 
-		const float h = 0.01f; // avoid z-fight with zero plane
+		const float h = gridHelperHeight;
 		const int gridRes3D = 20;
 		uint32_t linecount = (gridRes3D + 1) * 2;
 
@@ -19934,6 +19935,14 @@ void SetGridHelperColor(const XMFLOAT4& value)
 XMFLOAT4 GetGridHelperColor()
 {
 	return gridHelperColor;
+}
+void SetGridHelperHeight(float value)
+{
+	gridHelperHeight = value;
+}
+float GetGridHelperHeight()
+{
+	return gridHelperHeight;
 }
 void SetGridHelper2D(bool value)
 {

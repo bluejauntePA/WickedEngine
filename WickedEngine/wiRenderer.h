@@ -1260,6 +1260,8 @@ namespace wi::renderer
 	void SetToDrawGridHelper(bool value);
 	void SetGridHelperColor(const XMFLOAT4& value);
 	XMFLOAT4 GetGridHelperColor();
+	void SetGridHelperHeight(float value);
+	float GetGridHelperHeight();
 	void SetGridHelper2D(bool value);
 	bool IsGridHelper2D();
 	bool GetToDrawVoxelHelper();
