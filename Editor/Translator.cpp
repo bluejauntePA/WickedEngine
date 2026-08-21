@@ -645,7 +645,8 @@ void Translator::Update(const CameraComponent& camera, const XMFLOAT4& currentMo
 					trackball_delta_radians = XMFLOAT2(
 						(trackball_mouse_start.y - currentMouse.y) * tool_trackball_sensitivity,
 						(trackball_mouse_start.x - currentMouse.x) * tool_trackball_sensitivity);
-					if (wi::input::Down(wi::input::BUTTON::KEYBOARD_BUTTON_LCONTROL))
+					if (tool_ctrl_snapping_enabled
+						&& wi::input::Down(wi::input::BUTTON::KEYBOARD_BUTTON_LCONTROL))
 					{
 						constexpr float trackballSnap = XM_PI / 36.0f;
 						trackball_delta_radians.x = std::round(
@@ -718,7 +719,8 @@ void Translator::Update(const CameraComponent& camera, const XMFLOAT4& currentMo
 					break;
 				}
 
-				if (wi::input::Down(wi::input::BUTTON::KEYBOARD_BUTTON_LCONTROL))
+				if (tool_ctrl_snapping_enabled
+					&& wi::input::Down(wi::input::BUTTON::KEYBOARD_BUTTON_LCONTROL))
 				{
 					// Snap mode:
 					angle = std::round(angle / rotate_snap) * rotate_snap;
@@ -858,7 +860,9 @@ void Translator::Update(const CameraComponent& camera, const XMFLOAT4& currentMo
 					transform.Scale(scale);
 				}
 
-				if (wi::input::Down(wi::input::BUTTON::KEYBOARD_BUTTON_LCONTROL) || wi::input::Down(wi::input::BUTTON::KEYBOARD_BUTTON_RCONTROL))
+				if (tool_ctrl_snapping_enabled
+					&& (wi::input::Down(wi::input::BUTTON::KEYBOARD_BUTTON_LCONTROL)
+						|| wi::input::Down(wi::input::BUTTON::KEYBOARD_BUTTON_RCONTROL)))
 				{
 					// Snap to grid mode:
 					if (isTranslator)
